@@ -113,6 +113,3 @@ client.on(Events.InteractionCreate, async interaction => {
 
 const TOKEN = process.env.DISCORD_TOKEN;
 client.login(TOKEN);
-
-// // 用你的 Bot Token
-// client.login('MTQ2OTA1OTg2NTg0OTg5MzExNg.Gb14c1.yhIHSMKmNouDJYqlRIH7IJG90n_8Kf2GaV4ItE');
