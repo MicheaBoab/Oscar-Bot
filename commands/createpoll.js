@@ -47,7 +47,7 @@ module.exports = {
       return interaction.reply({
         content: `❌ 已经存在名为 **${title}** 的投票（区分大小写）`,
         flags: 64,
-    });
+      });
   }
     // 收集所有选项
     const rawOptions = interaction.options

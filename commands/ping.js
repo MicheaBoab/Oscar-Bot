@@ -6,6 +6,9 @@ module.exports = {
     .setDescription('测试用指令，回复 pong'),
 
   async execute(interaction) {
-    await interaction.reply('🏓 pong!');
+    await interaction.reply({
+      content: `🏓 pong!`,
+      flags: 64,
+    });
   },
 };
