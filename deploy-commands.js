@@ -16,7 +16,10 @@ for (const file of commandFiles) {
 
 const CLIENT_ID_TOKEN = process.env.CLIENT_ID;
 const GUILD_ID_TOKEN = process.env.GUILD_ID;
-const TOKEN = process.env.DISCORD_TOKEN;
+
+const TOKEN = process.env.ENVIRONMENT === 'development' 
+  ? process.env.DISCORD_TOKEN_DEV 
+  : process.env.DISCORD_TOKEN_PROD;
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
