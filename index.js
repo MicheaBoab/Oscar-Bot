@@ -49,6 +49,54 @@ client.on(Events.InteractionCreate, async interaction => {
     }
     return;
   }
+
+  /* =========================
+     Button（find 分页）
+     ========================= */
+  if (interaction.isButton()) {
+    if (interaction.customId.startsWith('findall_page:')) {
+      try {
+        const findAllCommand = client.commands.get('findall');
+        if (findAllCommand && typeof findAllCommand.handleFindAllPageButton === 'function') {
+          await findAllCommand.handleFindAllPageButton(interaction);
+        }
+      } catch (error) {
+        console.error(error);
+        if (!interaction.replied && !interaction.deferred) {
+          try {
+            await interaction.reply({ content: '❌ 翻页时发生错误', flags: 64 });
+          } catch (replyError) {
+            console.error(replyError);
+          }
+        }
+      }
+      return;
+    }
+
+    if (!interaction.customId.startsWith('find_page:')) return;
+
+    try {
+      const findCommand = client.commands.get('find');
+      if (!findCommand || typeof findCommand.handleFindPageButton !== 'function') {
+        return;
+      }
+
+      await findCommand.handleFindPageButton(interaction);
+    } catch (error) {
+      console.error(error);
+      if (!interaction.replied && !interaction.deferred) {
+        try {
+          await interaction.reply({
+            content: '❌ 翻页时发生错误',
+            flags: 64,
+          });
+        } catch (replyError) {
+          console.error(replyError);
+        }
+      }
+    }
+    return;
+  }
  
   /* =========================
      Select Menu（投票逻辑）
@@ -111,5 +159,8 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 });
 
-const TOKEN = process.env.DISCORD_TOKEN;
+const TOKEN = process.env.ENVIRONMENT === 'development' 
+  ? process.env.DISCORD_TOKEN_DEV 
+  : process.env.DISCORD_TOKEN_PROD;
+
 client.login(TOKEN);
