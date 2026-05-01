@@ -12,8 +12,17 @@ yarn-error.log*
 # runtime data (bot generated)
 storage/polls/
 storage/archive/
+storage/AOB/
+storage/items/icons/
+storage/items/codexItemTable.json
+storage/items/codexItemMeta.json
+storage/liveQueue.json
+storage/watchStore.json
 
 # OS / editor noise
 .DS_Store
 Thumbs.db
 .vscode/
+/storage/items
+storage/liveQueue.json
+storage/watchStore.json
