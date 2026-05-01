@@ -66,7 +66,7 @@ module.exports = {
       },
       {
         label: '🔧  工具',
-        names: ['howtouse', 'ping'],
+        names: ['howtouse', 'ping', 'showqueue'],
       },
     ];
 
@@ -131,6 +131,7 @@ module.exports = {
     lines.push('  ▸ /signup 重复报名会覆盖你的旧记录。');
     lines.push('  ▸ /find 结果所有人可见，2 分钟后自动删除。');
     lines.push('  ▸ /find 结果超过 10 条时可用按钮翻页。');
+    lines.push('  ▸ /showqueue 可查看 BDO 世界市场上架等待队列。');
     lines.push(DIVIDER);
 
     const fullText = lines.join('\n');

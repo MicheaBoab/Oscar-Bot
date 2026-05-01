@@ -4,9 +4,48 @@ const { Client, GatewayIntentBits, Events, Collection, EmbedBuilder} = require('
 
 require("dotenv").config();
 const { listPolls, loadPoll } = require('./storage/pollFileStore');
+const { initializeCodexAutoUpdate } = require('./storage/codexItemStore');
+const { startLiveQueueScheduler } = require('./helper/liveQueueScheduler');
 
 const pollTiles = listPolls();
 console.log(`♻️ 恢复 ${pollTiles.length} 个投票`);
+initializeCodexAutoUpdate();
+
+function closeExpiredPolls(reason = 'startup') {
+  const {
+    listPolls,
+    loadPoll,
+    updatePoll,
+    archivePoll,
+  } = require('./storage/pollFileStore');
+
+  const all = listPolls();
+  let closed = 0;
+
+  for (const pollTitle of all) {
+    const poll = loadPoll(pollTitle);
+    if (!poll || poll.status !== 'active') continue;
+    if (!Number.isFinite(poll.expiresAt)) {
+      poll.expiresAt = Date.now() + 10 * 60 * 1000;
+      updatePoll(pollTitle, poll);
+      continue;
+    }
+    if (Date.now() < poll.expiresAt) continue;
+
+    poll.status = 'ended';
+    updatePoll(pollTitle, poll);
+    archivePoll(pollTitle);
+    closed += 1;
+  }
+
+  if (closed > 0) {
+    const prefix = reason === 'startup' ? '启动时' : '定时检查';
+    console.log(`⏱ ${prefix}已自动结束并归档 ${closed} 个过期投票`);
+  }
+}
+
+closeExpiredPolls('startup');
+setInterval(() => closeExpiredPolls('interval'), 15 * 1000);
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
@@ -27,9 +66,24 @@ for (const file of commandFiles) {
 
 client.once(Events.ClientReady, () => {
   console.log(`🤖 Logged in as ${client.user.tag}`);
+  startLiveQueueScheduler(client);
 });
 
 client.on(Events.InteractionCreate, async interaction => {
+  /* =========================
+     Autocomplete
+     ========================= */
+  if (interaction.isAutocomplete()) {
+    const command = client.commands.get(interaction.commandName);
+    if (!command || typeof command.autocomplete !== 'function') return;
+    try {
+      await command.autocomplete(interaction);
+    } catch (err) {
+      console.error('[autocomplete error]', err);
+    }
+    return;
+  }
+
   /* =========================
      Slash Command
      ========================= */ 
@@ -44,7 +98,6 @@ client.on(Events.InteractionCreate, async interaction => {
       await interaction.reply({
         content: '❌ 执行命令时发生错误',
         flags: 64,
-        ephemeral: true,
       });
     }
     return;
@@ -107,6 +160,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const {
       loadPoll,
       updatePoll,
+      archivePoll,
     } = require('./storage/pollFileStore');
 
     const pollTitle = interaction.customId.split(':')[1];
@@ -118,6 +172,17 @@ client.on(Events.InteractionCreate, async interaction => {
     if (!poll || poll.status !== 'active') {
       await interaction.update({
         content: '⏹️ 该投票已结束',
+        components: [],
+      });
+      return;
+    }
+
+    if (Number.isFinite(poll.expiresAt) && Date.now() >= poll.expiresAt) {
+      poll.status = 'ended';
+      updatePoll(pollTitle, poll);
+      archivePoll(pollTitle);
+      await interaction.update({
+        content: '⏱️ 该投票倒计时已结束',
         components: [],
       });
       return;
