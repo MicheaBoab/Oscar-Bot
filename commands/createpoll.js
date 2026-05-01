@@ -10,6 +10,7 @@ const {
 const {
   parseOption
 } = require('../helper/parseOption');
+const { parseDurationInput } = require('../helper/parseDuration');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -24,6 +25,12 @@ module.exports = {
       option.setName('options')
             .setDescription('投票选项, 请用 | 来做分割 (最多25个)')
             .setRequired(true),
+    )
+    .addStringOption(option =>
+      option
+        .setName('countdown')
+        .setDescription('可选：倒计时，如 30s / 60s / 120min / 5d（默认10min）')
+        .setRequired(false),
     ),
 
   // 1. 读取参数
@@ -41,6 +48,15 @@ module.exports = {
     ① 读取参数
     ========================= */
     const title = interaction.options.getString('title');
+    const countdownInput = interaction.options.getString('countdown');
+    const parsedDuration = parseDurationInput(countdownInput, 10 * 60 * 1000);
+
+    if (!parsedDuration.ok) {
+      return interaction.reply({
+        content: `❌ countdown 参数错误：${parsedDuration.error}`,
+        flags: 64,
+      });
+    }
 
     // 冲突检测
     if (pollExistsByTitle(title)) {
@@ -62,14 +78,12 @@ module.exports = {
     if (rawOptions.length < 2) {
       return interaction.reply({
         content: '❌ 至少需要 2 个选项',
-        ephemeral: true,
         flags: 64,
     });
     }
     if (rawOptions.length > 25) {
       return interaction.reply({
         content: '❌ 最多只能有 25 个选项',
-        ephemeral: true,
         flags: 64,
       });
     }
@@ -113,6 +127,9 @@ module.exports = {
       votes: {},
       status: 'active',
       time: Date.now(),
+      durationMs: parsedDuration.ms,
+      expiresAt: Date.now() + parsedDuration.ms,
+      countdownInput: parsedDuration.normalized,
     };
 
     // ⭐ 写入文件
@@ -128,9 +145,13 @@ module.exports = {
     }));
 
     const embed = new EmbedBuilder()
-      .setTitle(`📊 投票：${title}`)
+      .setTitle(`📊 投票：${title}（<t:${Math.floor(pollData.expiresAt / 1000)}:R>）`)
       .setFields(fields)
-      .setDescription('请从下拉菜单中选择一个选项')
+      .setDescription([
+        '请从下拉菜单中选择一个选项',
+        `⏳ 倒计时：<t:${Math.floor(pollData.expiresAt / 1000)}:R>`,
+        `🕒 截止时间：<t:${Math.floor(pollData.expiresAt / 1000)}:f>`,
+      ].join('\n'))
       .setColor(0x5865f2);
 
     /* =========================
