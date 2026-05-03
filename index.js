@@ -11,7 +11,56 @@ const pollTiles = listPolls();
 console.log(`♻️ 恢复 ${pollTiles.length} 个投票`);
 initializeCodexAutoUpdate();
 
-function closeExpiredPolls(reason = 'startup') {
+// ── Poll result helpers ─────────────────────────────────────────────────────
+function computePollResult(poll) {
+  const counts = new Array(poll.options.length).fill(0);
+  for (const voteIndex of Object.values(poll.votes || {})) {
+    if (Number.isFinite(voteIndex) && voteIndex >= 0 && voteIndex < poll.options.length) {
+      counts[voteIndex]++;
+    }
+  }
+  const totalVotes = counts.reduce((a, b) => a + b, 0);
+  const maxVotes = totalVotes > 0 ? Math.max(...counts) : 0;
+  const winnerIndexes = totalVotes > 0
+    ? counts.map((c, i) => ({ c, i })).filter(x => x.c === maxVotes).map(x => x.i)
+    : [];
+  const winnerMentions = winnerIndexes.map(i => {
+    const opt = poll.options[i];
+    if (opt.value.startsWith('user:')) return `<@${opt.value.split(':')[1]}>`;
+    return opt.label;
+  });
+  return { counts, totalVotes, maxVotes, winnerIndexes, winnerMentions };
+}
+
+function buildResultEmbed(poll, footerText = '该投票已结束') {
+  const { winnerMentions } = computePollResult(poll);
+  return new EmbedBuilder()
+    .setColor(0x57F287)
+    .setTitle('🟢 投票已结束\n')
+    .setDescription([
+      `\n🏆 **${poll.title}** 投票结果公布\n`,
+      `🎉 获胜者为：**${winnerMentions.join(' | ')}**`,
+      '\n👏 感谢大家的参与',
+    ].join('\n'))
+    .setFooter({ text: footerText })
+    .setTimestamp();
+}
+
+function buildDisabledEmbed(poll) {
+  const { counts } = computePollResult(poll);
+  const fields = poll.options.map((opt, i) => ({
+    name: '\u200B',
+    value: `${opt.label}\n**${counts[i]} 票**`,
+    inline: false,
+  }));
+  return new EmbedBuilder()
+    .setTitle(`📊 投票已结束：${poll.title}`)
+    .setDescription('⏱️ 该投票已到期结束，无法继续投票。')
+    .setFields(fields)
+    .setColor(0x99AAB5);
+}
+
+async function closeExpiredPolls(client = null, reason = 'startup') {
   const {
     listPolls,
     loadPoll,
@@ -36,6 +85,29 @@ function closeExpiredPolls(reason = 'startup') {
     updatePoll(pollTitle, poll);
     archivePoll(pollTitle);
     closed += 1;
+
+    // 有 client 时向频道发送统计结果，并将原消息更新为已结束样式
+    if (client && poll.channelId) {
+      try {
+        const channel = await client.channels.fetch(poll.channelId);
+        if (poll.messageId) {
+          try {
+            const msg = await channel.messages.fetch(poll.messageId);
+            await msg.edit({ content: null, embeds: [buildDisabledEmbed(poll)], components: [] });
+          } catch {
+            // 原消息已被删除或无权限，忽略
+          }
+        }
+        const { totalVotes } = computePollResult(poll);
+        if (totalVotes === 0) {
+          await channel.send({ content: `🏆 **投票结果公布**\n⚖️ **${poll.title}** 无人投票\n👏 感谢大家的参与` });
+        } else {
+          await channel.send({ embeds: [buildResultEmbed(poll, '该投票已超时自动结束')] });
+        }
+      } catch (err) {
+        console.error(`[poll] 自动结束 ${pollTitle} 时通知失败:`, err.message);
+      }
+    }
   }
 
   if (closed > 0) {
@@ -44,8 +116,7 @@ function closeExpiredPolls(reason = 'startup') {
   }
 }
 
-closeExpiredPolls('startup');
-setInterval(() => closeExpiredPolls('interval'), 15 * 1000);
+closeExpiredPolls(null, 'startup');
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
@@ -67,6 +138,10 @@ for (const file of commandFiles) {
 client.once(Events.ClientReady, () => {
   console.log(`🤖 Logged in as ${client.user.tag}`);
   startLiveQueueScheduler(client);
+  setInterval(
+    () => closeExpiredPolls(client, 'interval').catch(err => console.error('[poll] 定时检查失败:', err)),
+    15 * 1000,
+  );
 });
 
 client.on(Events.InteractionCreate, async interaction => {
@@ -181,10 +256,15 @@ client.on(Events.InteractionCreate, async interaction => {
       poll.status = 'ended';
       updatePoll(pollTitle, poll);
       archivePoll(pollTitle);
-      await interaction.update({
-        content: '⏱️ 该投票倒计时已结束',
-        components: [],
-      });
+      // 将原投票消息更新为已结束样式，移除下拉菜单
+      await interaction.update({ content: null, embeds: [buildDisabledEmbed(poll)], components: [] });
+      // 向频道发送投票结果
+      const { totalVotes } = computePollResult(poll);
+      if (totalVotes === 0) {
+        await interaction.channel.send({ content: `🏆 **投票结果公布**\n⚖️ **${poll.title}** 无人投票\n👏 感谢大家的参与` });
+      } else {
+        await interaction.channel.send({ embeds: [buildResultEmbed(poll, '该投票倒计时已结束')] });
+      }
       return;
     }
 

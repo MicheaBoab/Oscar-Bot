@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
-const { setLiveQueue } = require('../storage/liveQueueStore');
+const { getLiveQueue, setLiveQueue } = require('../storage/liveQueueStore');
 const { doQueueUpdateForGuild } = require('../helper/liveQueueScheduler');
 
 module.exports = {
@@ -19,12 +19,25 @@ module.exports = {
     const channel = interaction.options.getChannel('channel');
     const guildId = interaction.guildId;
 
+    const existing = getLiveQueue(guildId);
+    const oldChannelId = existing?.channelId || null;
+
+    let replyContent;
+    if (oldChannelId && oldChannelId === channel.id) {
+      replyContent = `ℹ️ ${channel} 已经是当前队列频道，无需更改。`;
+      await interaction.reply({ content: replyContent, flags: 64 });
+      return;
+    }
+
     setLiveQueue(guildId, channel.id);
 
-    await interaction.reply({
-      content: `✅ 已将市场队列自动更新频道设置为 ${channel}，正在发送第一条消息…`,
-      flags: 64,
-    });
+    if (oldChannelId && oldChannelId !== channel.id) {
+      replyContent = `✅ 队列频道已从 <#${oldChannelId}> 移动到 ${channel}，正在发送第一条消息…`;
+    } else {
+      replyContent = `✅ 已将市场队列自动更新频道设置为 ${channel}，正在发送第一条消息…`;
+    }
+
+    await interaction.reply({ content: replyContent, flags: 64 });
 
     // 立即触发一次更新，不等待结果
     doQueueUpdateForGuild(interaction.client, guildId).catch(err =>

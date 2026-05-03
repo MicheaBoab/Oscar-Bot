@@ -1,14 +1,16 @@
 const { resolveItemMeta } = require('../storage/itemNameStore');
+const { writeEnhRangeToTable } = require('../storage/itemNameStore');
 const { ensureLocalIcon } = require('../storage/localIconStore');
 const { getAllLiveQueues, updateMessageIds } = require('../storage/liveQueueStore');
 const { getGuildWatches, getLastSeenMatch, setLastSeenMatch } = require('../storage/watchStore');
 const {
   parseWaitList,
   formatDisplayName,
-  formatEnhancement,
+  formatEnhancementWithRange,
   buildMessagePayload,
   EMBEDS_PER_MSG,
   REGION_BASE_URL,
+  resolveEnhRange,
 } = require('../commands/showqueue');
 
 const SCAN_INTERVAL_MS = 60 * 1000; // 1 分钟
@@ -32,7 +34,7 @@ async function fetchQueueItems() {
   return parseWaitList(data.resultMsg);
 }
 
-async function prepareItems(items) {
+async function prepareItems(items, pendingRangeUpdates) {
   const prepared = new Array(items.length);
   for (let i = 0; i < items.length; i += ICON_CONCURRENCY) {
     const batch = items.slice(i, i + ICON_CONCURRENCY);
@@ -43,7 +45,8 @@ async function prepareItems(items) {
         const localIconPath = itemMeta?.icon
           ? await ensureLocalIcon(item.itemId, itemMeta.icon)
           : null;
-        return { item, displayName, localIconPath };
+        const enhRange = pendingRangeUpdates[item.itemId] || {};
+        return { item, displayName, localIconPath, enhRange, enhanceTag: itemMeta?.enhanceTag || 'none' };
       })
     );
     results.forEach((r, j) => { prepared[i + j] = r; });
@@ -54,6 +57,8 @@ async function prepareItems(items) {
 function normalizeEnhancementLabel(value) {
   if (value === null || value === undefined) return 'BASE';
   const text = String(value).trim().toUpperCase().replace(/\s+/g, '');
+  const numberMatch = text.match(/^\+?(\d+)$/);
+  if (numberMatch) return numberMatch[1];
   return text || 'BASE';
 }
 
@@ -62,10 +67,13 @@ async function sendWatchNotifications(channel, guildId, preparedItems) {
   if (!Array.isArray(watches) || watches.length === 0) return;
 
   for (const watch of watches) {
-    const matchedEntry = preparedItems.find(({ item }) => {
+    const matchedEntry = preparedItems.find(({ item, enhRange, enhanceTag }) => {
       if (String(item.itemId) !== String(watch.itemId)) return false;
       if (!watch.enhancement) return true;
-      const currentEnhance = normalizeEnhancementLabel(formatEnhancement(item.sid));
+      const range = enhRange || {};
+      const formattedEnhancement = formatEnhancementWithRange(item.sid, range.wmEnhMin, range.wmEnhMax, enhanceTag);
+      const fallbackEnhancement = Number(item.sid) === 0 ? 'BASE' : String(item.sid);
+      const currentEnhance = normalizeEnhancementLabel(formattedEnhancement ?? fallbackEnhancement);
       return currentEnhance === normalizeEnhancementLabel(watch.enhancement);
     });
 
@@ -133,8 +141,21 @@ async function doQueueUpdateForGuild(client, guildId) {
     return;
   }
 
+  // 对去重 itemId 拉取强化范围（in-memory pending，最后批量写入 JSON）
+  const pendingRangeUpdates = {};
+  if (activeItems.length > 0) {
+    const uniqueItemIds = [...new Set(activeItems.map(i => i.itemId))];
+    for (let i = 0; i < uniqueItemIds.length; i += ICON_CONCURRENCY) {
+      await Promise.all(
+        uniqueItemIds.slice(i, i + ICON_CONCURRENCY).map(id =>
+          resolveEnhRange(id, REGION_BASE_URL.na, pendingRangeUpdates)
+        )
+      );
+    }
+  }
+
   // 准备物品数据（并发下载图标）
-  const preparedItems = activeItems.length > 0 ? await prepareItems(activeItems) : [];
+  const preparedItems = activeItems.length > 0 ? await prepareItems(activeItems, pendingRangeUpdates) : [];
 
   if (watchChannel) {
     await sendWatchNotifications(watchChannel, guildId, preparedItems);
@@ -206,6 +227,9 @@ async function doQueueUpdateForGuild(client, guildId) {
   }
 
   updateMessageIds(guildId, finalMessageIds);
+
+  // 所有 embed 更新完毕，批量将本轮新拉取的范围写入 JSON
+  writeEnhRangeToTable(pendingRangeUpdates);
 }
 
 async function runAllGuilds(client) {

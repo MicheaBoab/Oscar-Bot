@@ -168,5 +168,16 @@ module.exports = {
       embeds: [embed],
       components: [row],
     });
+
+    // 记录消息位置，供自动到期时更新原消息和发送统计
+    try {
+      const { updatePoll } = require('../storage/pollFileStore');
+      const msg = await interaction.fetchReply();
+      pollData.messageId = msg.id;
+      pollData.channelId = msg.channelId;
+      updatePoll(title, pollData);
+    } catch {
+      // 非关键操作，失败时自动到期仍可归档，只是无法更新原消息
+    }
   },
 };
