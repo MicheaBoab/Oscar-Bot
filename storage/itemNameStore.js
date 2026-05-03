@@ -90,17 +90,24 @@ function normalizeTableToMap(raw) {
         const icon = value.icon ?? null;
         const category = value.category ?? null;
         const enhanceTag = value.enhanceTag ?? null;
+        const wmEnhMin = value.wmEnhMin !== undefined ? value.wmEnhMin : undefined;
+        const wmEnhMax = value.wmEnhMax !== undefined ? value.wmEnhMax : undefined;
+        const wmRangeUpdatedAt = typeof value.wmRangeUpdatedAt === 'number' ? value.wmRangeUpdatedAt : undefined;
         if (name || nameCN || nameTW) {
           const resolvedCategory = category ? String(category) : inferCategoryFromIcon(icon);
           const resolvedEnhanceTag = enhanceTag ? String(enhanceTag) : inferEnhanceTag(resolvedCategory);
-          map.set(String(id), {
+          const entry = {
             name: name ? String(name) : null,
             nameCN: nameCN ? String(nameCN) : null,
             nameTW: nameTW ? String(nameTW) : null,
             icon: icon ? String(icon) : null,
             category: resolvedCategory,
             enhanceTag: resolvedEnhanceTag,
-          });
+          };
+          if (wmEnhMin !== undefined) entry.wmEnhMin = wmEnhMin;
+          if (wmEnhMax !== undefined) entry.wmEnhMax = wmEnhMax;
+          if (wmRangeUpdatedAt !== undefined) entry.wmRangeUpdatedAt = wmRangeUpdatedAt;
+          map.set(String(id), entry);
         }
       }
     }
@@ -252,10 +259,42 @@ function searchItems(query, limit = 25) {
   return [...exact, ...prefix, ...contains].slice(0, limit);
 }
 
+// 写锁：确保同一时刻只有一个 writeEnhRangeToTable 在写文件
+let enhWriteQueue = Promise.resolve();
+
+/**
+ * 批量将强化范围写入 codexItemTable.json。
+ * updates: { [itemId]: { wmEnhMin, wmEnhMax, wmRangeUpdatedAt } }
+ * 使用 Promise 队列保证并发安全，只在所有 embed 构建完后统一调用一次。
+ */
+function writeEnhRangeToTable(updates) {
+  if (!updates || Object.keys(updates).length === 0) return enhWriteQueue;
+  enhWriteQueue = enhWriteQueue.then(() => {
+    ensureItemTableFile();
+    let table;
+    try {
+      table = JSON.parse(fs.readFileSync(CODEX_ITEM_TABLE_FILE, 'utf8'));
+    } catch {
+      table = {};
+    }
+    for (const [id, range] of Object.entries(updates)) {
+      if (!table[id]) table[id] = {};
+      table[id].wmEnhMin = range.wmEnhMin !== undefined ? range.wmEnhMin : null;
+      table[id].wmEnhMax = range.wmEnhMax !== undefined ? range.wmEnhMax : null;
+      table[id].wmRangeUpdatedAt = range.wmRangeUpdatedAt;
+    }
+    fs.writeFileSync(CODEX_ITEM_TABLE_FILE, JSON.stringify(table, null, 2));
+  }).catch(err => {
+    console.error('[itemNameStore] writeEnhRangeToTable 写入失败:', err.message);
+  });
+  return enhWriteQueue;
+}
+
 module.exports = {
   CODEX_ITEM_TABLE_FILE,
   resolveItemMeta,
   resolveItemName,
   findItemByName,
   searchItems,
+  writeEnhRangeToTable,
 };

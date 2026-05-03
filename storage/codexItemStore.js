@@ -173,11 +173,20 @@ async function fetchAndSaveCodexItemTable() {
   const twRows = await fetchCodexRows(CODEX_ITEMS_URL_TW);
   const twMap = buildItemMapFromCodexRows(twRows, 'tw');
 
+  // Read existing table to preserve market range fields written by the bot at runtime
+  let existingTable = {};
+  try {
+    existingTable = JSON.parse(fs.readFileSync(CODEX_ITEM_TABLE_FILE, 'utf8'));
+  } catch {
+    existingTable = {};
+  }
+
   // Merge: EN entries as base, inject CN/TW localized names
   const merged = {};
   for (const [id, entry] of Object.entries(enMap)) {
     const category = entry.category || cnMap[id]?.category || twMap[id]?.category || 'other';
     const enhanceTag = entry.enhanceTag || cnMap[id]?.enhanceTag || twMap[id]?.enhanceTag || 'none';
+    const existing = existingTable[id] || {};
     merged[id] = {
       name: entry.name,
       nameCN: cnMap[id]?.nameCN ?? null,
@@ -186,10 +195,15 @@ async function fetchAndSaveCodexItemTable() {
       category,
       enhanceTag,
     };
+    // Preserve market enhancement range fields if present
+    if ('wmEnhMin' in existing) merged[id].wmEnhMin = existing.wmEnhMin;
+    if ('wmEnhMax' in existing) merged[id].wmEnhMax = existing.wmEnhMax;
+    if ('wmRangeUpdatedAt' in existing) merged[id].wmRangeUpdatedAt = existing.wmRangeUpdatedAt;
   }
   // Include any CN-only/TW-only entries (edge case)
   for (const [id, entry] of Object.entries(cnMap)) {
     if (!merged[id]) {
+      const existing = existingTable[id] || {};
       merged[id] = {
         name: null,
         nameCN: entry.nameCN,
@@ -198,10 +212,14 @@ async function fetchAndSaveCodexItemTable() {
         category: entry.category || 'other',
         enhanceTag: entry.enhanceTag || 'none',
       };
+      if ('wmEnhMin' in existing) merged[id].wmEnhMin = existing.wmEnhMin;
+      if ('wmEnhMax' in existing) merged[id].wmEnhMax = existing.wmEnhMax;
+      if ('wmRangeUpdatedAt' in existing) merged[id].wmRangeUpdatedAt = existing.wmRangeUpdatedAt;
     }
   }
   for (const [id, entry] of Object.entries(twMap)) {
     if (!merged[id]) {
+      const existing = existingTable[id] || {};
       merged[id] = {
         name: null,
         nameCN: cnMap[id]?.nameCN ?? null,
@@ -210,6 +228,9 @@ async function fetchAndSaveCodexItemTable() {
         category: entry.category || 'other',
         enhanceTag: entry.enhanceTag || 'none',
       };
+      if ('wmEnhMin' in existing) merged[id].wmEnhMin = existing.wmEnhMin;
+      if ('wmEnhMax' in existing) merged[id].wmEnhMax = existing.wmEnhMax;
+      if ('wmRangeUpdatedAt' in existing) merged[id].wmRangeUpdatedAt = existing.wmRangeUpdatedAt;
     }
   }
 
