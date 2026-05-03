@@ -33,19 +33,15 @@ function normalizeEnhancementInput(raw) {
   const text = String(raw).trim().toUpperCase().replace(/\s+/g, '');
   if (!text) return null;
 
+  if (text === 'BASE' || text === '0') return 'BASE';
   if (STAGE_ALIAS[text]) return STAGE_ALIAS[text];
   if (ROMAN_ALIAS[text]) return ROMAN_ALIAS[text];
-  if (text === 'BASE' || text === '0') return 'BASE';
 
   const plusMatch = text.match(/^\+?(\d+)$/);
   if (plusMatch) {
     const level = Number(plusMatch[1]);
-    if (level >= 1 && level <= 10) {
-      const label = ['PRI', 'DUO', 'TRI', 'TET', 'PEN', 'HEX', 'SEP', 'OCT', 'NOV', 'DEC'][level - 1];
-      const roman = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'][level - 1];
-      return `${label}(${roman})`;
-    }
-    return `+${level}`;
+    if (!Number.isFinite(level)) return null;
+    return String(level);
   }
 
   const normalizedParenthesized = text.replace(/[\[\{]/g, '(').replace(/[\]\}]/g, ')');
@@ -205,7 +201,7 @@ ${lines.join('\n')}`,
 
     if (!found) {
       await interaction.reply({
-        content: `❌ 未找到物品：${itemName}`,
+        content: '❌ 当前物品名称无效，请检查后重新输入。',
         flags: 64,
       });
       return;

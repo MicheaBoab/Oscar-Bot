@@ -3,10 +3,25 @@ const path = require('path');
 
 const STORE_PATH = path.join(__dirname, 'liveQueue.json');
 
+function normalizeGuildConfig(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  return {
+    channelId: typeof raw.channelId === 'string' ? raw.channelId : null,
+    messageIds: Array.isArray(raw.messageIds) ? raw.messageIds : [],
+    watchChannelId: typeof raw.watchChannelId === 'string' ? raw.watchChannelId : null,
+  };
+}
+
 function loadStore() {
   if (!fs.existsSync(STORE_PATH)) return {};
   try {
-    return JSON.parse(fs.readFileSync(STORE_PATH, 'utf-8'));
+    const raw = JSON.parse(fs.readFileSync(STORE_PATH, 'utf-8'));
+    const normalized = {};
+    for (const [guildId, config] of Object.entries(raw)) {
+      const clean = normalizeGuildConfig(config);
+      if (clean) normalized[guildId] = clean;
+    }
+    return normalized;
   } catch {
     return {};
   }
