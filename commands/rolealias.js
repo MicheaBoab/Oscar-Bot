@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
@@ -19,6 +19,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('rolealias')
     .setDescription('身分组别名管理')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addSubcommand(subcommand =>
       subcommand
         .setName('add')
@@ -55,7 +56,7 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    if (!interaction.memberPermissions.has('ADMINISTRATOR')) {
+    if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
       await interaction.reply({ content: '❌ 只有管理员可以使用此命令', ephemeral: true });
       return;
     }
