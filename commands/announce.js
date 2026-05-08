@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { SlashCommandBuilder, PermissionFlagsBits, AttachmentBuilder } = require('discord.js');
-const { toNextSameUtcTime, renderRecurringDiscordTimestamps } = require('../helper/timeHelpers');
+const { renderRecurringDiscordTimestamps } = require('../helper/timeHelpers');
 
 const ALIASES_FILE = path.join(__dirname, '../storage/roleAliases.json');
 const NOTICES_FILE = path.join(__dirname, '../storage/noticeTexts.json');
