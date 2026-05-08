@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, PermissionFlagsBits } = require('discord.js');
 const { downloadImage } = require('../helper/downloadImage');
-const { toNextSameUtcTime, renderRecurringDiscordTimestamps } = require('../helper/timeHelpers');
+const { renderRecurringDiscordTimestamps } = require('../helper/timeHelpers');
 
 const NOTICES_FILE = path.join(__dirname, '../storage/noticeTexts.json');
 
