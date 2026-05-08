@@ -302,6 +302,32 @@ client.on(Events.InteractionCreate, async interaction => {
 
     await interaction.editReply({embeds: [newEmbed]});
   }
+
+  /* =========================
+     Modal Submit（notice）
+     ========================= */
+  if (interaction.isModalSubmit()) {
+    if (interaction.customId.startsWith('notice_add_modal_') || interaction.customId.startsWith('notice_edit_modal_')) {
+      try {
+        const noticeCommand = client.commands.get('notice');
+        if (noticeCommand && typeof noticeCommand.handleModalSubmit === 'function') {
+          await noticeCommand.handleModalSubmit(interaction);
+        }
+      } catch (error) {
+        console.error('[modal error]', error);
+        if (!interaction.replied && !interaction.deferred) {
+          try {
+            await interaction.reply({
+              content: '❌ 处理提交时发生错误',
+              flags: 64,
+            });
+          } catch (replyError) {
+            console.error(replyError);
+          }
+        }
+      }
+    }
+  }
 });
 
 const TOKEN = process.env.ENVIRONMENT === 'development' 

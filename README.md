@@ -1,103 +1,100 @@
 # Oscar-Bot
 
-A simple, modular Discord bot powered by **discord.js** featuring persistent polls and slash command interactions.
+Oscar-Bot 是一个基于 discord.js v14 的模块化 Discord 机器人。
 
----
+当前主要功能包括：
 
-## Features
+- 投票系统
+- 报名与查询流程
+- 黑沙（BDO）世界市场队列追踪
+- 关注通知（watch）
+- 公告模板与发送（支持单次时间偏移 offset）
 
-* Slash Commands
-* Interactive Poll System
-* Persistent Poll Storage
-* Automatic Poll Recovery
-* Modular Command Structure
+## 核心特性
 
----
+- 全部采用 Slash Commands
+- 投票数据持久化，重启后可恢复
+- 市场队列与 watch 自动调度
+- notice 模板支持本地图片下载
+- announce 支持单次 offset 调整时间戳（不会改写模板）
 
-## Demo Features
+## 命令总览
 
-| Feature        | Description                        |
-| -------------- | ---------------------------------- |
-| Slash Commands | Modern Discord interaction support |
-| Polls          | Create and vote using select menus |
-| Persistence    | Polls remain after restart         |
-| Modular Design | Easy command expansion             |
+### 公告系统
 
----
+- `/rolealias add|remove|list`
+  - 管理公告用的角色别名
+- `/notice add|edit|remove|list|set-image`
+  - 管理公告模板与图片
+- `/announce role:<别名> text:<公告别名> [offset]`
+  - 发送公告并 @ 对应角色
+  - `offset` 格式：`+/-数字+s/m/h/d`
+  - 示例：`+10m`、`-30s`、`+2h`、`-1d`
+  - `offset` 仅本次生效，不会持久化
 
-## Getting Started
+### 投票系统
 
-### 1. Clone Repository
+- `/createpoll`
+- `/listpolls`
+- `/endpoll`
 
-```bash
-git clone https://github.com/MicheaBoab/Oscar-Bot.git
-cd Oscar-Bot
+### 报名与查询
+
+- `/signup`
+- `/find`
+- `/findall`
+
+### 市场队列与关注
+
+- `/showqueue`
+- `/setqueue`
+- `/forcequeue`
+- `/stopqueue`
+- `/watch add|list|remove`
+- `/setwatch`
+
+## 常见使用流程
+
+1. 设置公告角色别名
+
+```text
+/rolealias add name:raid role1:@GroupA role2:@GroupB
 ```
 
-### 2. Install Dependencies
+2. 新建公告模板
 
-```bash
-npm install
+```text
+/notice add alias:night_raid
 ```
 
-### 3. Configure Environment
+3. （可选）给模板设置图片
 
-Create `.env`:
-
-```
-DISCORD_TOKEN=YOUR_TOKEN
-CLIENT_ID=YOUR_CLIENT_ID
-GUILD_ID=YOUR_GUILD_ID
+```text
+/notice set-image alias:night_raid image_url:https://example.com/pic.jpg
 ```
 
----
+4. 发送公告
 
-## Register Commands
-
-```bash
-node deploy-commands.js
+```text
+/announce role:raid text:night_raid
 ```
 
----
+5. 发送公告并做单次时间偏移
 
-## Run
-
-```bash
-node index.js
+```text
+/announce role:raid text:night_raid offset:+15m
 ```
 
----
+## 数据存储说明
 
----
+机器人会将运行数据保存在 `storage/` 下，例如：
 
-## Adding Commands
-
-1. Create a new file inside `commands/`
-2. Export command data + execute function
-3. Redeploy commands
-
----
-
-## Contributing
-
-Contributions are welcome.
-
-1. Fork repository
-2. Create feature branch
-3. Commit changes
-4. Open Pull Request
-
----
-
-## Roadmap
-
-* [ ] Multi-guild support
-* [ ] Database backend option
-* [ ] Permission system
-* [ ] Admin utilities
-
----
+- 投票数据及归档
+- watch 配置
+- 队列快照
+- 物品元数据与图标缓存
+- role 别名与 notice 模板
 
 ## License
 
-MIT License
+MIT
