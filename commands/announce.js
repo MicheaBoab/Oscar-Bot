@@ -242,9 +242,9 @@ module.exports = {
         sentAtMs: Date.now(),
       });
 
-      const isLastExpired = !lastAnnounce || !Number.isFinite(lastAnnounce.expiresAtMs)
-        ? true
-        : Date.now() >= lastAnnounce.expiresAtMs;
+      const isLastExpired = !!lastAnnounce
+        && Number.isFinite(lastAnnounce.expiresAtMs)
+        && Date.now() >= lastAnnounce.expiresAtMs;
 
       if (lastAnnounce && isLastExpired) {
         await deletePreviousAnnounceMessage(
