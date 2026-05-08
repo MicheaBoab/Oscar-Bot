@@ -2,9 +2,11 @@ const fs = require('fs');
 const path = require('path');
 const { SlashCommandBuilder, PermissionFlagsBits, AttachmentBuilder } = require('discord.js');
 const { renderRecurringDiscordTimestamps } = require('../helper/timeHelpers');
+const { getLastAnnounce, setLastAnnounce } = require('../storage/announceHistoryStore');
 
 const ALIASES_FILE = path.join(__dirname, '../storage/roleAliases.json');
 const NOTICES_FILE = path.join(__dirname, '../storage/noticeTexts.json');
+const DISCORD_TS_REGEX = /<t:(\d{1,12})(?::[tTdDfFR])?>/g;
 
 function loadRoleAliases() {
   if (fs.existsSync(ALIASES_FILE)) {
@@ -77,6 +79,34 @@ function parseSignedOffset(raw) {
   };
 }
 
+function extractDiscordTimestamps(text) {
+  const matches = String(text || '').matchAll(DISCORD_TS_REGEX);
+  const unixList = [];
+  for (const match of matches) {
+    const unix = Number(match[1]);
+    if (Number.isFinite(unix) && unix > 0) {
+      unixList.push(unix);
+    }
+  }
+  return unixList;
+}
+
+async function deletePreviousAnnounceMessage(client, guildId, channelId, messageId) {
+  if (!guildId || !channelId || !messageId) return;
+
+  try {
+    const channel = await client.channels.fetch(String(channelId));
+    if (!channel || !channel.isTextBased()) return;
+
+    const oldMessage = await channel.messages.fetch(String(messageId));
+    if (oldMessage) {
+      await oldMessage.delete();
+    }
+  } catch {
+    // 旧消息可能已被删除，或机器人无权限删除，忽略即可
+  }
+}
+
 
 
 module.exports = {
@@ -104,6 +134,7 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   async execute(interaction) {
+    const guildId = interaction.guildId;
     const roleAlias = interaction.options.getString('role', true).trim().toLowerCase();
     const textKey = interaction.options.getString('text', true).trim().toLowerCase();
     const offsetRaw = interaction.options.getString('offset', false) || '';
@@ -150,6 +181,30 @@ module.exports = {
       return;
     }
 
+    const lastAnnounce = guildId ? getLastAnnounce(guildId, textKey) : null;
+    if (
+      lastAnnounce
+      && Number.isFinite(lastAnnounce.expiresAtMs)
+      && Date.now() < lastAnnounce.expiresAtMs
+    ) {
+      const expiresUnix = Math.floor(lastAnnounce.expiresAtMs / 1000);
+      const jumpUrl = lastAnnounce.channelId && lastAnnounce.messageId
+        ? `https://discord.com/channels/${guildId}/${lastAnnounce.channelId}/${lastAnnounce.messageId}`
+        : null;
+      const location = lastAnnounce.channelId ? `<#${lastAnnounce.channelId}>` : '未知频道';
+
+      await interaction.reply({
+        content: [
+          `⚠️ 公告别名 \`${textKey}\` 的上一条消息尚未过期。`,
+          `过期时间：<t:${expiresUnix}:F>（<t:${expiresUnix}:R>）`,
+          `发送位置：${location}`,
+          jumpUrl ? `消息链接：${jumpUrl}` : null,
+        ].filter(Boolean).join('\n'),
+        flags: 64,
+      });
+      return;
+    }
+
     const renderedNoticeText = renderRecurringDiscordTimestamps(
       noticeResolved.text,
       Date.now(),
@@ -165,12 +220,40 @@ module.exports = {
       }
     }
 
-    await interaction.reply({
+    const sentMessage = await interaction.reply({
       content,
       files,
       allowedMentions: {
         roles: roleIds,
       },
+      fetchReply: true,
     });
+
+    const renderedUnixList = extractDiscordTimestamps(renderedNoticeText);
+    const expiresAtMs = renderedUnixList.length > 0
+      ? Math.max(...renderedUnixList) * 1000
+      : null;
+
+    if (guildId) {
+      setLastAnnounce(guildId, textKey, {
+        channelId: sentMessage.channelId,
+        messageId: sentMessage.id,
+        expiresAtMs,
+        sentAtMs: Date.now(),
+      });
+
+      const isLastExpired = !lastAnnounce || !Number.isFinite(lastAnnounce.expiresAtMs)
+        ? true
+        : Date.now() >= lastAnnounce.expiresAtMs;
+
+      if (lastAnnounce && isLastExpired) {
+        await deletePreviousAnnounceMessage(
+          interaction.client,
+          guildId,
+          lastAnnounce.channelId,
+          lastAnnounce.messageId,
+        );
+      }
+    }
   },
 };
