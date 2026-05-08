@@ -14,6 +14,7 @@ storage/archive/
 storage/polls/
 storage/liveQueue.json
 storage/watchStore.json
+storage/announceHistory.json
 storage/items/
 storage/images/
 
