@@ -85,6 +85,12 @@ Oscar-Bot 是一个基于 discord.js v14 的模块化 Discord 机器人。
 /announce role:raid text:night_raid offset:+15m
 ```
 
+6. 上一条未过期时强制重发（并删除旧消息）
+
+```text
+/announce role:raid text:night_raid force:true
+```
+
 ## 数据存储说明
 
 机器人会将运行数据保存在 `storage/` 下，例如：
