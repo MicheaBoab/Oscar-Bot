@@ -131,6 +131,12 @@ module.exports = {
         .setDescription('可选时间偏移：+/-数字+s/m/h/d（如 +10m、-30s）')
         .setRequired(false)
     )
+    .addBooleanOption(option =>
+      option
+        .setName('force')
+        .setDescription('强制重发：即使上一条未过期也发送，并尝试删除上一条')
+        .setRequired(false)
+    )
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   async execute(interaction) {
@@ -138,6 +144,7 @@ module.exports = {
     const roleAlias = interaction.options.getString('role', true).trim().toLowerCase();
     const textKey = interaction.options.getString('text', true).trim().toLowerCase();
     const offsetRaw = interaction.options.getString('offset', false) || '';
+    const forceResend = interaction.options.getBoolean('force', false) || false;
 
     const offset = parseSignedOffset(offsetRaw);
     if (!offset.ok) {
@@ -186,6 +193,7 @@ module.exports = {
       lastAnnounce
       && Number.isFinite(lastAnnounce.expiresAtMs)
       && Date.now() < lastAnnounce.expiresAtMs
+      && !forceResend
     ) {
       const expiresUnix = Math.floor(lastAnnounce.expiresAtMs / 1000);
       const jumpUrl = lastAnnounce.channelId && lastAnnounce.messageId
@@ -199,6 +207,7 @@ module.exports = {
           `过期时间：<t:${expiresUnix}:F>（<t:${expiresUnix}:R>）`,
           `发送位置：${location}`,
           jumpUrl ? `消息链接：${jumpUrl}` : null,
+          '如需立刻重发并删除旧消息，可使用：`/announce ... force:true`',
         ].filter(Boolean).join('\n'),
         flags: 64,
       });
@@ -246,7 +255,7 @@ module.exports = {
         && Number.isFinite(lastAnnounce.expiresAtMs)
         && Date.now() >= lastAnnounce.expiresAtMs;
 
-      if (lastAnnounce && isLastExpired) {
+      if (lastAnnounce && (isLastExpired || forceResend)) {
         await deletePreviousAnnounceMessage(
           interaction.client,
           guildId,

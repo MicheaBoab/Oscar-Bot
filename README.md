@@ -26,11 +26,20 @@ Oscar-Bot 是一个基于 discord.js v14 的模块化 Discord 机器人。
   - 管理公告用的角色别名
 - `/notice add|edit|remove|list|set-image`
   - 管理公告模板与图片
+<<<<<<< Updated upstream
 - `/announce role:<别名> text:<公告别名> [offset]`
   - 发送公告并 @ 对应角色
   - `offset` 格式：`+/-数字+s/m/h/d`
   - 示例：`+10m`、`-30s`、`+2h`、`-1d`
   - `offset` 仅本次生效，不会持久化
+=======
+- `/announce role:<别名> text:<公告别名> [offset] [force]`
+  - 发送公告并 @ 对应身份组
+  - `offset` 格式：`+/-数字+s/m/h/d`
+  - 示例：`+10m`、`-30s`、`+2h`、`-1d`
+  - `offset` 仅本次生效
+  - `force:true` 可在上一条未过期时强制重发，并尝试删除旧消息（用于修正发错内容）
+>>>>>>> Stashed changes
 
 ### 投票系统
 
@@ -83,6 +92,12 @@ Oscar-Bot 是一个基于 discord.js v14 的模块化 Discord 机器人。
 
 ```text
 /announce role:raid text:night_raid offset:+15m
+```
+
+6. 上一条未过期时强制重发（并删除旧消息）
+
+```text
+/announce role:raid text:night_raid force:true
 ```
 
 ## 数据存储说明
