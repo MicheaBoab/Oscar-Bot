@@ -6,7 +6,7 @@ const { getLastAnnounce, setLastAnnounce } = require('../storage/announceHistory
 
 const ALIASES_FILE = path.join(__dirname, '../storage/roleAliases.json');
 const NOTICES_FILE = path.join(__dirname, '../storage/noticeTexts.json');
-const DISCORD_TS_REGEX = /<t:(\d{1,12})(?::[tTdDfFR])?>/g;
+const DISCORD_TS_REGEX = /<t:(\d{1,12})(?::[tTdDfFRsS])?>/g;
 
 function loadRoleAliases() {
   if (fs.existsSync(ALIASES_FILE)) {

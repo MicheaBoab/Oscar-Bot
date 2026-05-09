@@ -38,7 +38,7 @@ function extractTimeTemplates(text) {
   const templates = [];
   const source = String(text || '');
   // 从 helper 中复用 DISCORD_TS_REGEX（通过重新定义本地引用）
-  const DISCORD_TS_REGEX = /<t:(\d{1,12})(?::([tTdDfFR]))?>/g;
+  const DISCORD_TS_REGEX = /<t:(\d{1,12})(?::([tTdDfFRsS]))?>/g;
   let match;
 
   while ((match = DISCORD_TS_REGEX.exec(source)) !== null) {

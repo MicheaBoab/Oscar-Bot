@@ -28,7 +28,7 @@ function toNextSameUtcTime(unix, nowMs) {
 }
 
 // Discord 时间戳正则表达式
-const DISCORD_TS_REGEX = /<t:(\d{1,12})(?::([tTdDfFR]))?>/g;
+const DISCORD_TS_REGEX = /<t:(\d{1,12})(?::([tTdDfFRsS]))?>/g;
 
 /**
  * 将文本中的 Discord 时间戳替换为计算后的值
