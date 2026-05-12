@@ -188,30 +188,31 @@ module.exports = {
       return;
     }
 
-    const lastAnnounce = guildId ? getLastAnnounce(guildId, textKey) : null;
-    if (
-      lastAnnounce
-      && Number.isFinite(lastAnnounce.expiresAtMs)
-      && Date.now() < lastAnnounce.expiresAtMs
-      && !forceResend
-    ) {
-      const expiresUnix = Math.floor(lastAnnounce.expiresAtMs / 1000);
-      const jumpUrl = lastAnnounce.channelId && lastAnnounce.messageId
-        ? `https://discord.com/channels/${guildId}/${lastAnnounce.channelId}/${lastAnnounce.messageId}`
-        : null;
-      const location = lastAnnounce.channelId ? `<#${lastAnnounce.channelId}>` : '未知频道';
+    const lastAnnounce = guildId ? getLastAnnounce(guildId, roleAlias, textKey) : null;
+    
+    // 检查是否应该继续发送：仅当有时间戳、未过期、且无 force:true 时才阻止
+    if (lastAnnounce && Number.isFinite(lastAnnounce.expiresAtMs)) {
+      const isExpired = Date.now() >= lastAnnounce.expiresAtMs;
+      
+      if (!isExpired && !forceResend) {
+        const expiresUnix = Math.floor(lastAnnounce.expiresAtMs / 1000);
+        const jumpUrl = lastAnnounce.channelId && lastAnnounce.messageId
+          ? `https://discord.com/channels/${guildId}/${lastAnnounce.channelId}/${lastAnnounce.messageId}`
+          : null;
+        const location = lastAnnounce.channelId ? `<#${lastAnnounce.channelId}>` : '未知频道';
 
-      await interaction.reply({
-        content: [
-          `⚠️ 公告别名 \`${textKey}\` 的上一条消息尚未过期。`,
-          `过期时间：<t:${expiresUnix}:F>（<t:${expiresUnix}:R>）`,
-          `发送位置：${location}`,
-          jumpUrl ? `消息链接：${jumpUrl}` : null,
-          '如需立刻重发并删除旧消息，可使用：`/announce ... force:true`',
-        ].filter(Boolean).join('\n'),
-        flags: 64,
-      });
-      return;
+        await interaction.reply({
+          content: [
+            `⚠️ 检测到公告别名 \`${textKey}\` 的上一条消息尚未过期。`,
+            `过期时间：<t:${expiresUnix}:F>（<t:${expiresUnix}:R>）`,
+            `发送位置：${location}`,
+            jumpUrl ? `消息链接：${jumpUrl}` : null,
+            '如需立刻重新发送并删除上一条消息，请使用：`/announce role:... text:... force:true`',
+          ].filter(Boolean).join('\n'),
+          flags: 64,
+        });
+        return;
+      }
     }
 
     const renderedNoticeText = renderRecurringDiscordTimestamps(
@@ -244,24 +245,34 @@ module.exports = {
       : null;
 
     if (guildId) {
-      setLastAnnounce(guildId, textKey, {
+      setLastAnnounce(guildId, roleAlias, textKey, {
         channelId: sentMessage.channelId,
         messageId: sentMessage.id,
         expiresAtMs,
         sentAtMs: Date.now(),
       });
 
-      const isLastExpired = !!lastAnnounce
-        && Number.isFinite(lastAnnounce.expiresAtMs)
-        && Date.now() >= lastAnnounce.expiresAtMs;
+      // 判断是否需要删除上一条消息
+      if (lastAnnounce) {
+        let shouldDelete = false;
 
-      if (lastAnnounce && (isLastExpired || forceResend)) {
-        await deletePreviousAnnounceMessage(
-          interaction.client,
-          guildId,
-          lastAnnounce.channelId,
-          lastAnnounce.messageId,
-        );
+        if (!Number.isFinite(lastAnnounce.expiresAtMs)) {
+          // 没有时间戳，直接删除
+          shouldDelete = true;
+        } else {
+          // 有时间戳，判断是否过期或强制重发
+          const isExpired = Date.now() >= lastAnnounce.expiresAtMs;
+          shouldDelete = isExpired || forceResend;
+        }
+
+        if (shouldDelete) {
+          await deletePreviousAnnounceMessage(
+            interaction.client,
+            guildId,
+            lastAnnounce.channelId,
+            lastAnnounce.messageId,
+          );
+        }
       }
     }
   },

@@ -22,20 +22,32 @@ function ensureGuild(store, guildId) {
   }
 }
 
-function getLastAnnounce(guildId, textKey) {
+function getLastAnnounce(guildId, roleAlias, textKey) {
   const store = loadStore();
   ensureGuild(store, guildId);
-  const key = String(textKey || '').trim().toLowerCase();
-  return store[guildId][key] || null;
+  const roleKey = String(roleAlias || '').trim().toLowerCase();
+  const textKeyNormalized = String(textKey || '').trim().toLowerCase();
+  
+  if (!store[guildId][roleKey] || typeof store[guildId][roleKey] !== 'object') {
+    return null;
+  }
+  
+  return store[guildId][roleKey][textKeyNormalized] || null;
 }
 
-function setLastAnnounce(guildId, textKey, payload) {
+function setLastAnnounce(guildId, roleAlias, textKey, payload) {
   const store = loadStore();
   ensureGuild(store, guildId);
 
-  const key = String(textKey || '').trim().toLowerCase();
-  store[guildId][key] = {
-    textKey: key,
+  const roleKey = String(roleAlias || '').trim().toLowerCase();
+  const textKeyNormalized = String(textKey || '').trim().toLowerCase();
+  
+  if (!store[guildId][roleKey] || typeof store[guildId][roleKey] !== 'object') {
+    store[guildId][roleKey] = {};
+  }
+  
+  store[guildId][roleKey][textKeyNormalized] = {
+    textKey: textKeyNormalized,
     channelId: String(payload.channelId || ''),
     messageId: String(payload.messageId || ''),
     expiresAtMs: Number.isFinite(payload.expiresAtMs) ? Number(payload.expiresAtMs) : null,
