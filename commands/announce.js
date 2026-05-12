@@ -203,7 +203,8 @@ module.exports = {
 
         await interaction.reply({
           content: [
-            `⚠️ 检测到公告别名 \`${textKey}\` 的上一条消息尚未过期。`,
+            `⚠️ 检测到公告记录（role: \`${roleAlias}\` + text: \`${textKey}\`）的上一条消息尚未过期。`,
+            `目标角色：${mentionText}`,
             `过期时间：<t:${expiresUnix}:F>（<t:${expiresUnix}:R>）`,
             `发送位置：${location}`,
             jumpUrl ? `消息链接：${jumpUrl}` : null,
