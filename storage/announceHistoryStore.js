@@ -15,7 +15,8 @@ function isSafeObjectKey(key) {
 function loadStore() {
   if (!fs.existsSync(STORE_PATH)) return {};
   try {
-    return JSON.parse(fs.readFileSync(STORE_PATH, 'utf-8'));
+    const parsed = JSON.parse(fs.readFileSync(STORE_PATH, 'utf-8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
   } catch {
     return {};
   }
