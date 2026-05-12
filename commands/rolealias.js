@@ -3,12 +3,36 @@ const fs = require('fs');
 const path = require('path');
 
 const ALIASES_FILE = path.join(__dirname, '../storage/roleAliases.json');
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function normalizeAliasName(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isSafeObjectKey(key) {
+  return key.length > 0 && !FORBIDDEN_KEYS.has(key);
+}
 
 function loadAliases() {
-  if (fs.existsSync(ALIASES_FILE)) {
-    return JSON.parse(fs.readFileSync(ALIASES_FILE, 'utf-8'));
+  if (!fs.existsSync(ALIASES_FILE)) {
+    return { aliases: {} };
   }
-  return { aliases: {} };
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(ALIASES_FILE, 'utf-8'));
+    const aliases = {};
+    const source = parsed && typeof parsed.aliases === 'object' ? parsed.aliases : {};
+
+    for (const [name, roles] of Object.entries(source)) {
+      const key = normalizeAliasName(name);
+      if (!isSafeObjectKey(key)) continue;
+      aliases[key] = Array.isArray(roles) ? roles.map(id => String(id)) : [];
+    }
+
+    return { aliases };
+  } catch {
+    return { aliases: {} };
+  }
 }
 
 function saveAliases(data) {
@@ -65,7 +89,13 @@ module.exports = {
     const data = loadAliases();
 
     if (subcommand === 'add') {
-      const name = interaction.options.getString('name').trim().toLowerCase();
+      const name = normalizeAliasName(interaction.options.getString('name'));
+
+      if (!isSafeObjectKey(name)) {
+        await interaction.reply({ content: '❌ 别名不可使用保留关键字，请换一个名称', ephemeral: true });
+        return;
+      }
+
       const roles = [];
 
       for (let i = 1; i <= 5; i += 1) {
@@ -92,7 +122,12 @@ module.exports = {
     }
 
     if (subcommand === 'remove') {
-      const name = interaction.options.getString('name').trim().toLowerCase();
+      const name = normalizeAliasName(interaction.options.getString('name'));
+
+      if (!isSafeObjectKey(name)) {
+        await interaction.reply({ content: '❌ 别名不可使用保留关键字，请换一个名称', ephemeral: true });
+        return;
+      }
 
       if (!data.aliases[name]) {
         await interaction.reply({ content: `❌ 找不到别名 **${name}**`, ephemeral: true });

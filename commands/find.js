@@ -6,6 +6,7 @@ const {
 } = require('discord.js');
 const { loadSignups } = require('../storage/signupFileStore');
 const { resolveDisplayName } = require('../helper/displayNameCache');
+const SIGNUP_CONSTANTS = require('../helper/signupConstants');
 
 const PAGE_SIZE = 10;
 const FIND_REPLY_TTL_MS = 2 * 60 * 1000;
@@ -313,17 +314,17 @@ module.exports = {
     .addIntegerOption(option =>
       option
         .setName('最高层数')
-        .setDescription('最高允许当前最高层（0-21）')
-        .setMinValue(0)
-        .setMaxValue(21)
+        .setDescription(`最高允许当前最高层（${SIGNUP_CONSTANTS.FLOOR_MIN}-${SIGNUP_CONSTANTS.FLOOR_MAX}）`)
+        .setMinValue(SIGNUP_CONSTANTS.FLOOR_MIN)
+        .setMaxValue(SIGNUP_CONSTANTS.FLOOR_MAX)
         .setRequired(false),
     )
     .addIntegerOption(option =>
       option
         .setName('ap')
-        .setDescription('最低 AP（0-400）')
-        .setMinValue(0)
-        .setMaxValue(400)
+        .setDescription(`最低 AP（${SIGNUP_CONSTANTS.AP_MIN}-${SIGNUP_CONSTANTS.AP_MAX}）`)
+        .setMinValue(SIGNUP_CONSTANTS.AP_MIN)
+        .setMaxValue(SIGNUP_CONSTANTS.AP_MAX)
         .setRequired(false),
     )
     .addUserOption(option =>

@@ -1,5 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { appendSignup } = require('../storage/signupFileStore');
+const SIGNUP_CONSTANTS = require('../helper/signupConstants');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -9,16 +10,16 @@ module.exports = {
       option
         .setName('当前最高层')
         .setDescription('当前最高层')
-        .setMinValue(0)
-        .setMaxValue(21)
+        .setMinValue(SIGNUP_CONSTANTS.FLOOR_MIN)
+        .setMaxValue(SIGNUP_CONSTANTS.FLOOR_MAX)
         .setRequired(true),
     )
     .addIntegerOption(option =>
       option
         .setName('ap')
         .setDescription('AP')
-        .setMinValue(0)
-        .setMaxValue(400)
+        .setMinValue(SIGNUP_CONSTANTS.AP_MIN)
+        .setMaxValue(SIGNUP_CONSTANTS.AP_MAX)
         .setRequired(true),
     )
     .addStringOption(option =>
@@ -41,16 +42,16 @@ module.exports = {
     const 需要carry = interaction.options.getBoolean('需要carry');
     const 昵称 = interaction.member?.displayName || interaction.user.username;
 
-    if (当前最高层 < 0 || 当前最高层 > 21) {
+    if (当前最高层 < SIGNUP_CONSTANTS.FLOOR_MIN || 当前最高层 > SIGNUP_CONSTANTS.FLOOR_MAX) {
       return interaction.reply({
-        content: '❌ 当前最高层必须在 0 到 21 之间',
+        content: `❌ 当前最高层必须在 ${SIGNUP_CONSTANTS.FLOOR_MIN} 到 ${SIGNUP_CONSTANTS.FLOOR_MAX} 之间`,
         flags: 64,
       });
     }
 
-    if (AP < 0 || AP > 400) {
+    if (AP < SIGNUP_CONSTANTS.AP_MIN || AP > SIGNUP_CONSTANTS.AP_MAX) {
       return interaction.reply({
-        content: '❌ AP 必须在 0 到 400 之间',
+        content: `❌ AP 必须在 ${SIGNUP_CONSTANTS.AP_MIN} 到 ${SIGNUP_CONSTANTS.AP_MAX} 之间`,
         flags: 64,
       });
     }

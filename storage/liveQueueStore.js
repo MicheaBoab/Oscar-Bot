@@ -2,6 +2,15 @@ const fs = require('fs');
 const path = require('path');
 
 const STORE_PATH = path.join(__dirname, 'liveQueue.json');
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function normalizeKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isSafeObjectKey(key) {
+  return key.length > 0 && !FORBIDDEN_KEYS.has(key);
+}
 
 function normalizeGuildConfig(raw) {
   if (!raw || typeof raw !== 'object') return null;
@@ -18,8 +27,11 @@ function loadStore() {
     const raw = JSON.parse(fs.readFileSync(STORE_PATH, 'utf-8'));
     const normalized = {};
     for (const [guildId, config] of Object.entries(raw)) {
+      const guildKey = normalizeKey(guildId);
+      if (!isSafeObjectKey(guildKey)) continue;
+
       const clean = normalizeGuildConfig(config);
-      if (clean) normalized[guildId] = clean;
+      if (clean) normalized[guildKey] = clean;
     }
     return normalized;
   } catch {
@@ -32,14 +44,19 @@ function saveStore(data) {
 }
 
 function getLiveQueue(guildId) {
-  return loadStore()[guildId] || null;
+  const guildKey = normalizeKey(guildId);
+  if (!isSafeObjectKey(guildKey)) return null;
+  return loadStore()[guildKey] || null;
 }
 
 /** 设置（或覆盖）某个 guild 的推送频道，同时清空旧消息 ID */
 function setLiveQueue(guildId, channelId) {
+  const guildKey = normalizeKey(guildId);
+  if (!isSafeObjectKey(guildKey)) return;
+
   const store = loadStore();
-  const existing = store[guildId] || {};
-  store[guildId] = {
+  const existing = store[guildKey] || {};
+  store[guildKey] = {
     channelId,
     messageIds: [],
     watchChannelId: existing.watchChannelId || null,
@@ -48,9 +65,12 @@ function setLiveQueue(guildId, channelId) {
 }
 
 function setWatchChannel(guildId, watchChannelId) {
+  const guildKey = normalizeKey(guildId);
+  if (!isSafeObjectKey(guildKey)) return;
+
   const store = loadStore();
-  const existing = store[guildId] || {};
-  store[guildId] = {
+  const existing = store[guildKey] || {};
+  store[guildKey] = {
     channelId: existing.channelId || null,
     messageIds: Array.isArray(existing.messageIds) ? existing.messageIds : [],
     watchChannelId,
@@ -66,9 +86,12 @@ function getWatchChannel(guildId) {
 
 /** 更新已发送消息的 ID 列表 */
 function updateMessageIds(guildId, messageIds) {
+  const guildKey = normalizeKey(guildId);
+  if (!isSafeObjectKey(guildKey)) return;
+
   const store = loadStore();
-  if (store[guildId]) {
-    store[guildId].messageIds = messageIds;
+  if (store[guildKey]) {
+    store[guildKey].messageIds = messageIds;
     saveStore(store);
   }
 }
@@ -78,10 +101,13 @@ function getAllLiveQueues() {
 }
 
 function removeLiveQueue(guildId) {
+  const guildKey = normalizeKey(guildId);
+  if (!isSafeObjectKey(guildKey)) return null;
+
   const store = loadStore();
-  const existing = store[guildId] || null;
+  const existing = store[guildKey] || null;
   if (existing) {
-    delete store[guildId];
+    delete store[guildKey];
     saveStore(store);
   }
   return existing;
