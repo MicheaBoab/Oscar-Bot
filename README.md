@@ -23,14 +23,14 @@ Oscar-Bot 是一个基于 discord.js v14 的模块化 Discord 机器人。
 ### 公告系统
 
 - `/rolealias add|remove|list`
-  - 管理公告用的身份组别名
+	- 管理公告用的身份组别名
 - `/notice add|edit|remove|list|set-image`
-  - 管理公告模板与图片
+	- 管理公告模板与图片
 - `/announce role:<别名> text:<公告别名> [offset]`
-  - 发送公告并 @ 对应身份组
-  - `offset` 格式：`+/-数字+s/m/h/d`
-  - 示例：`+10m`、`-30s`、`+2h`、`-1d`
-  - `offset` 仅本次生效
+	- 发送公告并 @ 对应身份组
+	- `offset` 格式：`+/-数字+s/m/h/d`
+	- 示例：`+10m`、`-30s`、`+2h`、`-1d`
+	- `offset` 仅本次生效
 
 ### 投票系统
 
