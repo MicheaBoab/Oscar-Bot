@@ -115,7 +115,7 @@ const MANUALS = {
   all: [
     '## 命令总览',
     '',
-    '使用方式：`/manual [section] [private]`',
+    '使用方式：`/manual [section]`',
     '',
     '### 公告',
     '- `/rolealias add|remove|list`：管理公告身份组别名。',
@@ -160,18 +160,12 @@ module.exports = {
           { name: 'watch - 关注通知', value: 'watch' },
           { name: 'all - 命令总览', value: 'all' },
         )
-    )
-    .addBooleanOption(option =>
-      option
-        .setName('private')
-        .setDescription('是否仅自己可见（默认 false；填写 section 时会强制私密）')
-        .setRequired(false)
     ),
 
   async execute(interaction) {
     const sectionInput = interaction.options.getString('section');
     const section = sectionInput || 'quick';
-    const isPrivate = sectionInput !== null || interaction.options.getBoolean('private') === true;
+    const isPrivate = sectionInput !== null;
     const isAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) === true;
 
     // 规则：/manual（不带 section）仅管理员可用；/manual section:<name> 所有人可用且私密
