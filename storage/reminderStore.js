@@ -68,6 +68,19 @@ function normalizeReminder(raw) {
   };
 }
 
+function normalizeRoleIds(rawValue) {
+  if (Array.isArray(rawValue)) {
+    return rawValue.map(value => String(value || '').trim()).filter(Boolean);
+  }
+
+  if (typeof rawValue === 'string') {
+    const trimmed = rawValue.trim();
+    return trimmed ? [trimmed] : [];
+  }
+
+  return [];
+}
+
 function normalizeGuildConfig(raw) {
   const reminders = Array.isArray(raw?.reminders)
     ? raw.reminders.map(normalizeReminder).filter(Boolean)
@@ -76,6 +89,7 @@ function normalizeGuildConfig(raw) {
   return {
     channelId: typeof raw?.channelId === 'string' ? raw.channelId : null,
     roleId: typeof raw?.roleId === 'string' ? raw.roleId : null,
+    roleIds: normalizeRoleIds(raw?.roleIds || raw?.roleId),
     timezone: typeof raw?.timezone === 'string' && raw.timezone.trim()
       ? raw.timezone.trim()
       : DEFAULT_REMINDER_TIMEZONE,
@@ -137,11 +151,17 @@ function setReminderChannel(guildId, channelId) {
   return store[guildKey];
 }
 
-function setReminderRole(guildId, roleId) {
+function setReminderRole(guildId, roleIds) {
   const store = loadStore();
   const guildKey = normalizeKey(guildId);
   if (!ensureGuild(store, guildKey)) return null;
-  store[guildKey].roleId = String(roleId);
+
+  const normalizedRoleIds = Array.isArray(roleIds)
+    ? roleIds.map(value => String(value || '').trim()).filter(Boolean)
+    : [String(roleIds || '').trim()].filter(Boolean);
+
+  store[guildKey].roleIds = normalizedRoleIds;
+  store[guildKey].roleId = normalizedRoleIds[0] || null;
   saveStore(store);
   return store[guildKey];
 }
