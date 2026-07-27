@@ -198,12 +198,13 @@ function isReminderActiveOnDate(reminder, dateKey) {
   return true;
 }
 
-function buildReminderSlotKey(dateKey, hour, minute) {
-  return `${dateKey}T${formatClockTime(hour, minute)}`;
+function buildReminderSlotKey(dateKey, hour, minute, kind = null) {
+  const base = `${dateKey}T${formatClockTime(hour, minute)}`;
+  return kind ? `${base}|${kind}` : base;
 }
 
 function parseReminderSlotKey(slotKey) {
-  const match = String(slotKey || '').trim().match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/);
+  const match = String(slotKey || '').trim().match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?:\|(.+))?$/);
   if (!match) return null;
   const dateKey = match[1];
   const hour = Number(match[2]);
@@ -211,7 +212,7 @@ function parseReminderSlotKey(slotKey) {
   if (!parseIsoDate(dateKey)) return null;
   if (!Number.isInteger(hour) || hour < 0 || hour > 23) return null;
   if (!Number.isInteger(minute) || minute < 0 || minute > 59) return null;
-  return { dateKey, hour, minute };
+  return { dateKey, hour, minute, kind: match[4] || null };
 }
 
 function findUnixForLocalTime(dateKey, hour, minute, timezone) {

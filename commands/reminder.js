@@ -62,6 +62,14 @@ function toDotDate(isoDate) {
   return `${String(parsed.month).padStart(2, '0')}.${String(parsed.day).padStart(2, '0')}.${String(parsed.year).padStart(4, '0')}`;
 }
 
+function buildRoleMentionText(roleIds = []) {
+  return (Array.isArray(roleIds) ? roleIds : [])
+    .map(id => String(id || '').trim())
+    .filter(Boolean)
+    .map(id => `<@&${id}>`)
+    .join(' ');
+}
+
 function parseDotDateToIso(value) {
   const match = String(value || '').trim().match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
   if (!match) return null;
@@ -263,9 +271,12 @@ function buildCreateResultMessage(reminder, config) {
       : `\n下次触发：<t:${nextUnix}:F>（<t:${nextUnix}:R>）`
     : '';
 
+  const roleMentions = buildRoleMentionText(config.roleIds || []);
+  const roleLine = roleMentions || '未设置';
+
   return [
     `✅ 已建立 reminder：**${reminder.name}**`,
-    `发送：<#${config.channelId}> · <@&${config.roleId}>`,
+    `发送：<#${config.channelId}> · ${roleLine}（准点/提前 30 分钟/提前 5 分钟都会@）`,
     `排程：${frequencyLabel}${formatWeekdayLabel(scheduleWeekday)} ${formatClockTime(scheduleHour, scheduleMinute)} ${createMarkerFromTimezone(reminder.timezone)}${startDateLine}${activeRangeLine}${nextRunLine}`,
     `内容：${reminder.message}`,
   ].join('\n');
@@ -477,11 +488,22 @@ module.exports = {
     .addSubcommand(subcommand =>
       subcommand
         .setName('set-role')
-        .setDescription('设置提醒时要@的身分组')
-        .addRoleOption(option =>
+        .setDescription('设置提醒时要@的身分组（可选多个）')
+        .addRoleOption(option => option.setName('role1').setDescription('第 1 个提醒身分组').setRequired(false))
+        .addRoleOption(option => option.setName('role2').setDescription('第 2 个提醒身分组').setRequired(false))
+        .addRoleOption(option => option.setName('role3').setDescription('第 3 个提醒身分组').setRequired(false))
+        .addRoleOption(option => option.setName('role4').setDescription('第 4 个提醒身分组').setRequired(false))
+        .addRoleOption(option => option.setName('role5').setDescription('第 5 个提醒身分组').setRequired(false))
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('set-board-channel')
+        .setDescription('设置倒计时看板要发送到的频道')
+        .addChannelOption(option =>
           option
-            .setName('role')
-            .setDescription('提醒要@的身分组')
+            .setName('channel')
+            .setDescription('看板发送频道')
+            .addChannelTypes(ChannelType.GuildText)
             .setRequired(true)
         )
     )
@@ -553,10 +575,13 @@ module.exports = {
 
     if (subcommand === 'set-channel') {
       const channel = interaction.options.getChannel('channel', true);
+      const existingConfig = getReminderConfig(guildId) || {};
       setReminderChannel(guildId, channel.id);
-      setReminderBoardChannel(guildId, channel.id);
+      if (!existingConfig.boardChannelId) {
+        setReminderBoardChannel(guildId, channel.id);
+      }
       await interaction.reply({
-        content: `✅ reminder 频道已设置为 ${channel}（提醒发送与倒计时看板共用该频道）。`,
+        content: `✅ reminder 发送频道已设置为 ${channel}${existingConfig.boardChannelId ? '。看板频道保持原设置。' : '，并已同步为看板频道。'}`,
         flags: 64,
       });
 
@@ -566,11 +591,40 @@ module.exports = {
       return;
     }
 
-    if (subcommand === 'set-role') {
-      const role = interaction.options.getRole('role', true);
-      setReminderRole(guildId, role.id);
+    if (subcommand === 'set-board-channel') {
+      const channel = interaction.options.getChannel('channel', true);
+      setReminderBoardChannel(guildId, channel.id);
       await interaction.reply({
-        content: `✅ reminder @ 身分组已设置为 <@&${role.id}>`,
+        content: `✅ reminder 看板频道已设置为 ${channel}`,
+        flags: 64,
+      });
+
+      forceRefreshReminderBoard(guildId).catch(error =>
+        console.error('[reminder] set-board-channel 后刷新看板失败:', error.message)
+      );
+      return;
+    }
+
+    if (subcommand === 'set-role') {
+      const roleIds = [
+        interaction.options.getRole('role1'),
+        interaction.options.getRole('role2'),
+        interaction.options.getRole('role3'),
+        interaction.options.getRole('role4'),
+        interaction.options.getRole('role5'),
+      ].filter(Boolean).map(role => role.id);
+
+      if (roleIds.length === 0) {
+        await interaction.reply({
+          content: '❌ 请至少选择 1 个提醒身分组。',
+          flags: 64,
+        });
+        return;
+      }
+
+      setReminderRole(guildId, roleIds);
+      await interaction.reply({
+        content: `✅ reminder @ 身分组已设置为 ${roleIds.map(id => `<@&${id}>`).join(' ')}`,
         flags: 64,
       });
       return;
@@ -595,6 +649,7 @@ module.exports = {
       const config = getReminderConfig(guildId) || {
         channelId: null,
         roleId: null,
+        roleIds: [],
         timezone: DEFAULT_REMINDER_TIMEZONE,
         reminders: [],
       };
@@ -603,11 +658,13 @@ module.exports = {
         ? config.reminders.map(reminder => buildReminderLine(reminder)).join('\n')
         : '当前还没有任何 reminder。';
 
+      const roleMentions = buildRoleMentionText(config.roleIds || []);
       await interaction.reply({
         content: [
           '## Reminder 设置',
           `- 频道：${config.channelId ? `<#${config.channelId}>` : '未设置'}`,
-          `- 身分组：${config.roleId ? `<@&${config.roleId}>` : '未设置'}`,
+          `- 身分组：${roleMentions || '未设置'}`,
+          `- 看板频道：${config.boardChannelId ? `<#${config.boardChannelId}>` : (config.channelId ? `<#${config.channelId}>` : '未设置')}`,
           '- 看板刷新：每 30 分钟（固定）',
           '',
           '## Reminder 列表',
@@ -730,6 +787,7 @@ module.exports = {
     const config = getReminderConfig(guildId) || {
       channelId: null,
       roleId: null,
+      roleIds: [],
       timezone: DEFAULT_REMINDER_TIMEZONE,
       reminders: [],
     };
@@ -742,7 +800,7 @@ module.exports = {
       return;
     }
 
-    if (!config.roleId) {
+    if (!Array.isArray(config.roleIds) || config.roleIds.length === 0) {
       await interaction.reply({
         content: '❌ 请先使用 /reminder set-role 设置提醒身分组。',
         flags: 64,
@@ -816,6 +874,7 @@ module.exports = {
     const config = getReminderConfig(guildId) || {
       channelId: null,
       roleId: null,
+      roleIds: [],
       timezone: DEFAULT_REMINDER_TIMEZONE,
       reminders: [],
     };
@@ -828,7 +887,7 @@ module.exports = {
       return;
     }
 
-    if (!config.roleId) {
+    if (!Array.isArray(config.roleIds) || config.roleIds.length === 0) {
       await interaction.reply({
         content: '❌ 请先使用 /reminder set-role 设置提醒身分组。',
         flags: 64,

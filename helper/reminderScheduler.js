@@ -28,22 +28,47 @@ function clearSchedulerTimer() {
   }
 }
 
+function getTriggeredSlots(reminder, timezone, now = new Date()) {
+  const nowTs = now.getTime();
+  const fromDate = new Date(nowTs - 60 * 1000);
+  const nextUnix = computeNextReminderOccurrenceUnix(reminder, timezone, fromDate);
+  if (!Number.isFinite(nextUnix)) return [];
+
+  const nowParts = getZonedDateParts(now, timezone);
+  const triggerCandidates = [
+    { kind: 'main', unix: nextUnix },
+    { kind: 'pre-30m', unix: nextUnix - 30 * 60 },
+    { kind: 'pre-5m', unix: nextUnix - 5 * 60 },
+  ];
+
+  return triggerCandidates
+    .map(candidate => {
+      const candidateParts = getZonedDateParts(new Date(candidate.unix * 1000), timezone);
+      const isCurrentMinute = candidateParts.dateKey === nowParts.dateKey
+        && candidateParts.hour === nowParts.hour
+        && candidateParts.minute === nowParts.minute;
+      if (!isCurrentMinute) return null;
+
+      const slotKey = buildReminderSlotKey(candidateParts.dateKey, candidateParts.hour, candidateParts.minute, candidate.kind);
+      return { slotKey, kind: candidate.kind, unix: candidate.unix };
+    })
+    .filter(Boolean)
+    .filter(entry => entry.unix >= Math.floor(nowTs / 1000) - 60);
+}
+
 function getTriggeredSlot(reminder, timezone, now = new Date()) {
-  const parts = getZonedDateParts(now, timezone);
-  if (parts.weekday !== reminder.weekday) return null;
-  if (parts.hour !== reminder.hour || parts.minute !== reminder.minute) return null;
-  if (!isReminderActiveOnDate(reminder, parts.dateKey)) return null;
-  if (!matchesReminderDate(reminder, parts.dateKey)) return null;
-
-  const slotKey = buildReminderSlotKey(parts.dateKey, reminder.hour, reminder.minute);
-  if (reminder.lastTriggeredKey === slotKey) return null;
-
-  return slotKey;
+  const slots = getTriggeredSlots(reminder, timezone, now);
+  return slots[0]?.slotKey || null;
 }
 
 async function processGuildReminders(client, guildId, config) {
   if (!config || !Array.isArray(config.reminders) || config.reminders.length === 0) return;
-  if (!config.channelId || !config.roleId) return;
+
+  const roleIds = Array.isArray(config.roleIds) && config.roleIds.length > 0
+    ? config.roleIds
+    : (config.roleId ? [config.roleId] : []);
+
+  if (!config.channelId || roleIds.length === 0) return;
 
   try {
     getZonedDateParts(new Date(), config.timezone);
@@ -67,36 +92,42 @@ async function processGuildReminders(client, guildId, config) {
 
   for (const reminder of config.reminders) {
     const reminderTimezone = reminder.timezone || config.timezone;
-    let slotKey = null;
+    let triggerSlots = [];
     try {
-      slotKey = getTriggeredSlot(reminder, reminderTimezone);
+      triggerSlots = getTriggeredSlots(reminder, reminderTimezone);
     } catch (error) {
       console.error(`[reminder] guild ${guildId} 计算提醒 ${reminder.name} 时失败:`, error.message);
       continue;
     }
-    if (!slotKey) continue;
 
-    const slot = parseReminderSlotKey(slotKey);
-    const eventUnix = slot
-      ? findUnixForLocalTime(slot.dateKey, slot.hour, slot.minute, reminderTimezone)
-      : null;
-    const endUnix = Number.isFinite(eventUnix) && Number.isInteger(reminder.durationSeconds)
-      ? eventUnix + reminder.durationSeconds
-      : null;
-    const countdownLine = Number.isFinite(eventUnix)
-      ? Number.isFinite(endUnix)
-        ? `\n📅 活动时间：<t:${eventUnix}:F> - <t:${endUnix}:t>（<t:${eventUnix}:R>）`
-        : `\n📅 活动时间：<t:${eventUnix}:F>（<t:${eventUnix}:R>）`
-      : '';
+    for (const trigger of triggerSlots) {
+      const slot = parseReminderSlotKey(trigger.slotKey);
+      const eventUnix = slot
+        ? findUnixForLocalTime(slot.dateKey, slot.hour, slot.minute, reminderTimezone)
+        : null;
+      const endUnix = Number.isFinite(eventUnix) && Number.isInteger(reminder.durationSeconds)
+        ? eventUnix + reminder.durationSeconds
+        : null;
+      const countdownLine = Number.isFinite(eventUnix)
+        ? Number.isFinite(endUnix)
+          ? `\n📅 活动时间：<t:${eventUnix}:F> - <t:${endUnix}:t>（<t:${eventUnix}:R>）`
+          : `\n📅 活动时间：<t:${eventUnix}:F>（<t:${eventUnix}:R>）`
+        : '';
+      const kindLabel = trigger.kind === 'pre-30m'
+        ? '\n🕒 提前 30 分钟提醒'
+        : trigger.kind === 'pre-5m'
+          ? '\n🕒 提前 5 分钟提醒'
+          : '';
 
-    try {
-      await channel.send({
-        content: `<@&${config.roleId}>\n⏰ **${reminder.name}**${countdownLine}\n${reminder.message}`,
-        allowedMentions: { roles: [config.roleId] },
-      });
-      updateReminderLastTriggered(guildId, reminder.id, slotKey);
-    } catch (error) {
-      console.error(`[reminder] guild ${guildId} 发送提醒 ${reminder.name} 失败:`, error.message);
+      try {
+        await channel.send({
+          content: `${roleIds.map(id => `<@&${id}>`).join(' ')}\n⏰ **${reminder.name}**${kindLabel}${countdownLine}\n${reminder.message}`,
+          allowedMentions: { roles: roleIds },
+        });
+        updateReminderLastTriggered(guildId, reminder.id, trigger.slotKey);
+      } catch (error) {
+        console.error(`[reminder] guild ${guildId} 发送提醒 ${reminder.name} 失败:`, error.message);
+      }
     }
   }
 }
@@ -146,14 +177,15 @@ function buildBoardEmbed(guildId, config, nowUnix) {
 
 async function refreshReminderBoardForGuild(client, guildId, config, options = {}) {
   const forceRefresh = options.forceRefresh === true;
-  if (!config || !config.boardChannelId) return false;
+  const boardChannelId = config.boardChannelId || config.channelId || null;
+  if (!boardChannelId) return false;
   if (!shouldRefreshBoard(guildId, config, forceRefresh)) return false;
 
   let channel;
   try {
-    channel = await client.channels.fetch(config.boardChannelId);
+    channel = await client.channels.fetch(boardChannelId);
   } catch {
-    console.error(`[reminder] guild ${guildId} 无法获取看板频道 ${config.boardChannelId}`);
+    console.error(`[reminder] guild ${guildId} 无法获取看板频道 ${boardChannelId}`);
     return false;
   }
 
