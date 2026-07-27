@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { findItemByName, resolveItemMeta, searchItems } = require('../storage/itemNameStore');
-const { addWatch, getUserWatches, removeWatch } = require('../storage/watchStore');
+const { addWatch, getUserWatches, removeWatch, MAX_WATCHES_PER_USER } = require('../storage/watchStore');
 
 const ROMAN_ALIAS = {
   I: 'PRI(I)',
@@ -57,7 +57,7 @@ module.exports = {
     .addSubcommand(sub =>
       sub
         .setName('add')
-        .setDescription('关注某个物品上架：命中队列时会@你（每人最多5个）')
+        .setDescription(`关注某个物品上架：命中队列时会@你（每人最多${MAX_WATCHES_PER_USER}个）`)
         .addStringOption(option =>
           option
             .setName('item_name')
@@ -149,7 +149,7 @@ module.exports = {
         `${i + 1}. **${w.itemName}**${w.enhancement ? ` — ${w.enhancement}` : ''}`
       );
       await interaction.reply({
-        content: `📋 你的关注列表（${watches.length}/5）：
+        content: `📋 你的关注列表（${watches.length}/${MAX_WATCHES_PER_USER}）：
 ${lines.join('\n')}`,
         flags: 64,
       });
@@ -226,7 +226,7 @@ ${lines.join('\n')}`,
     if (!result.added) {
       if (result.reason === 'limit') {
         await interaction.reply({
-          content: '❌ 你已达到关注上限（最多 5 个），请先移除旧的关注。',
+          content: `❌ 你已达到关注上限（最多 ${MAX_WATCHES_PER_USER} 个），请先移除旧的关注。`,
           flags: 64,
         });
       } else {

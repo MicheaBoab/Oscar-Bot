@@ -6,6 +6,7 @@ require("dotenv").config();
 const { listPolls, loadPoll } = require('./storage/pollFileStore');
 const { initializeCodexAutoUpdate } = require('./storage/codexItemStore');
 const { startLiveQueueScheduler } = require('./helper/liveQueueScheduler');
+const { startReminderScheduler } = require('./helper/reminderScheduler');
 
 const pollTiles = listPolls();
 console.log(`♻️ 恢复 ${pollTiles.length} 个投票`);
@@ -138,6 +139,7 @@ for (const file of commandFiles) {
 client.once(Events.ClientReady, () => {
   console.log(`🤖 Logged in as ${client.user.tag}`);
   startLiveQueueScheduler(client);
+  startReminderScheduler(client);
   setInterval(
     () => closeExpiredPolls(client, 'interval').catch(err => console.error('[poll] 定时检查失败:', err)),
     15 * 1000,
@@ -312,6 +314,28 @@ client.on(Events.InteractionCreate, async interaction => {
         const noticeCommand = client.commands.get('notice');
         if (noticeCommand && typeof noticeCommand.handleModalSubmit === 'function') {
           await noticeCommand.handleModalSubmit(interaction);
+        }
+      } catch (error) {
+        console.error('[modal error]', error);
+        if (!interaction.replied && !interaction.deferred) {
+          try {
+            await interaction.reply({
+              content: '❌ 处理提交时发生错误',
+              flags: 64,
+            });
+          } catch (replyError) {
+            console.error(replyError);
+          }
+        }
+      }
+      return;
+    }
+
+    if (interaction.customId === 'reminder_add_modal' || interaction.customId.startsWith('reminder_edit_modal_')) {
+      try {
+        const reminderCommand = client.commands.get('reminder');
+        if (reminderCommand && typeof reminderCommand.handleModalSubmit === 'function') {
+          await reminderCommand.handleModalSubmit(interaction);
         }
       } catch (error) {
         console.error('[modal error]', error);

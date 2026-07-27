@@ -1,0 +1,45 @@
+{
+  "1073767351465553961": {
+    "channelId": "1494417706609283273",
+    "roleId": "1502387146953199717",
+    "timezone": "Asia/Taipei",
+    "boardChannelId": "1494417706609283273",
+    "boardMessageId": "1531416916588101760",
+    "reminders": [
+      {
+        "id": "1785188695567_vowq0w",
+        "name": "工会Boss",
+        "normalizedName": "工会boss",
+        "message": "每周工会Boss",
+        "weekday": 6,
+        "hour": 22,
+        "minute": 0,
+        "frequencyWeeks": 1,
+        "timezone": "America/Chicago",
+        "startDate": null,
+        "activeStartDate": null,
+        "activeEndDate": null,
+        "durationSeconds": null,
+        "createdAt": 1785188695567,
+        "lastTriggeredKey": null
+      },
+      {
+        "id": "1785189920639_3m6zta",
+        "name": "test1",
+        "normalizedName": "test1",
+        "message": "test1",
+        "weekday": 1,
+        "hour": 12,
+        "minute": 0,
+        "frequencyWeeks": 2,
+        "timezone": "America/New_York",
+        "startDate": "2026-07-27",
+        "activeStartDate": null,
+        "activeEndDate": null,
+        "durationSeconds": null,
+        "createdAt": 1785189920639,
+        "lastTriggeredKey": null
+      }
+    ]
+  }
+}
