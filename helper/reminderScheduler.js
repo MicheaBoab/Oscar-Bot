@@ -64,6 +64,10 @@ function getTriggeredSlot(reminder, timezone, now = new Date()) {
 async function processGuildReminders(client, guildId, config) {
   if (!config || !Array.isArray(config.reminders) || config.reminders.length === 0) return;
 
+  if (!config.boardChannelId) {
+    return;
+  }
+
   const roleIds = Array.isArray(config.roleIds) && config.roleIds.length > 0
     ? config.roleIds
     : (config.roleId ? [config.roleId] : []);
@@ -177,7 +181,7 @@ function buildBoardEmbed(guildId, config, nowUnix) {
 
 async function refreshReminderBoardForGuild(client, guildId, config, options = {}) {
   const forceRefresh = options.forceRefresh === true;
-  const boardChannelId = config.boardChannelId || config.channelId || null;
+  const boardChannelId = config.boardChannelId || null;
   if (!boardChannelId) return false;
   if (!shouldRefreshBoard(guildId, config, forceRefresh)) return false;
 
