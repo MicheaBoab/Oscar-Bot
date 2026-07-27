@@ -3,6 +3,7 @@ const path = require('path');
 
 const WATCH_STORE_PATH = path.join(__dirname, 'watchStore.json');
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const MAX_WATCHES_PER_USER = 15;
 
 function normalizeKey(value) {
   return String(value || '').trim().toLowerCase();
@@ -80,7 +81,7 @@ function addWatch(guildId, watch) {
   if (existing) return { added: false, reason: 'duplicate', watch: existing };
 
   const userCount = store[guildKey].watches.filter(w => w.userId === String(watch.userId)).length;
-  if (userCount >= 5) return { added: false, reason: 'limit', watch: null };
+  if (userCount >= MAX_WATCHES_PER_USER) return { added: false, reason: 'limit', watch: null };
 
   const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const row = {
@@ -138,6 +139,7 @@ function getLastSeenMatch(guildId, watchId) {
 }
 
 module.exports = {
+  MAX_WATCHES_PER_USER,
   getGuildWatches,
   getUserWatches,
   addWatch,
