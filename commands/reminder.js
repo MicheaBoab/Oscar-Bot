@@ -575,19 +575,11 @@ module.exports = {
 
     if (subcommand === 'set-channel') {
       const channel = interaction.options.getChannel('channel', true);
-      const existingConfig = getReminderConfig(guildId) || {};
       setReminderChannel(guildId, channel.id);
-      if (!existingConfig.boardChannelId) {
-        setReminderBoardChannel(guildId, channel.id);
-      }
       await interaction.reply({
-        content: `✅ reminder 发送频道已设置为 ${channel}${existingConfig.boardChannelId ? '。看板频道保持原设置。' : '，并已同步为看板频道。'}`,
+        content: `✅ reminder 发送频道已设置为 ${channel}。注意：看板功能仍需先使用 /reminder set-board-channel 配置看板频道。`,
         flags: 64,
       });
-
-      forceRefreshReminderBoard(guildId).catch(error =>
-        console.error('[reminder] set-channel 后刷新看板失败:', error.message)
-      );
       return;
     }
 
@@ -633,14 +625,20 @@ module.exports = {
     if (subcommand === 'refresh-board') {
       await interaction.deferReply({ flags: 64 });
       try {
+        const config = getReminderConfig(guildId) || { boardChannelId: null };
+        if (!config.boardChannelId) {
+          await interaction.editReply('⚠️ 请先使用 `/reminder set-board-channel` 配置看板频道，再刷新。');
+          return;
+        }
+
         const refreshed = await forceRefreshReminderBoard(guildId);
         if (refreshed) {
           await interaction.editReply('✅ 已立即刷新 reminder 倒计时看板。');
         } else {
-          await interaction.editReply('ℹ️ 当前未设置 reminder 频道，或暂无可刷新内容。请先使用 `/reminder set-channel`。');
+          await interaction.editReply('ℹ️ 当前暂无可刷新内容，或看板频道不可用。');
         }
       } catch (error) {
-        await interaction.editReply('❌ 刷新看板失败。请确认已设置 /reminder set-channel，并检查 bot 权限。');
+        await interaction.editReply('❌ 刷新看板失败。请确认已设置 /reminder set-board-channel，并检查 bot 权限。');
       }
       return;
     }
@@ -664,7 +662,7 @@ module.exports = {
           '## Reminder 设置',
           `- 频道：${config.channelId ? `<#${config.channelId}>` : '未设置'}`,
           `- 身分组：${roleMentions || '未设置'}`,
-          `- 看板频道：${config.boardChannelId ? `<#${config.boardChannelId}>` : (config.channelId ? `<#${config.channelId}>` : '未设置')}`,
+          `- 看板频道：${config.boardChannelId ? `<#${config.boardChannelId}>` : '未设置'}`,
           '- 看板刷新：每 30 分钟（固定）',
           '',
           '## Reminder 列表',
@@ -792,6 +790,14 @@ module.exports = {
       reminders: [],
     };
 
+    if (!config.boardChannelId) {
+      await interaction.reply({
+        content: '❌ 请先使用 /reminder set-board-channel 设置看板频道。',
+        flags: 64,
+      });
+      return;
+    }
+
     if (!config.channelId) {
       await interaction.reply({
         content: '❌ 请先使用 /reminder set-channel 设置提醒频道。',
@@ -878,6 +884,14 @@ module.exports = {
       timezone: DEFAULT_REMINDER_TIMEZONE,
       reminders: [],
     };
+
+    if (!config.boardChannelId) {
+      await interaction.reply({
+        content: '❌ 请先使用 /reminder set-board-channel 设置看板频道。',
+        flags: 64,
+      });
+      return;
+    }
 
     if (!config.channelId) {
       await interaction.reply({
