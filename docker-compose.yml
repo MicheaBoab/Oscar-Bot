@@ -1,0 +1,9 @@
+services:
+  oscar-bot:
+    build: .
+    container_name: oscar-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./storage:/app/storage
