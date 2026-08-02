@@ -38,7 +38,7 @@ function getTriggeredSlots(reminder, timezone, now = new Date()) {
   const triggerCandidates = [
     { kind: 'main', unix: nextUnix },
     { kind: 'pre-30m', unix: nextUnix - 30 * 60 },
-    { kind: 'pre-5m', unix: nextUnix - 5 * 60 },
+    { kind: 'pre-10m', unix: nextUnix - 10 * 60 },
   ];
 
   return triggerCandidates
@@ -59,6 +59,13 @@ function getTriggeredSlots(reminder, timezone, now = new Date()) {
 function getTriggeredSlot(reminder, timezone, now = new Date()) {
   const slots = getTriggeredSlots(reminder, timezone, now);
   return slots[0]?.slotKey || null;
+}
+
+function resolveEventStartUnix(triggerUnix, kind) {
+  if (!Number.isFinite(triggerUnix)) return null;
+  if (kind === 'pre-30m') return triggerUnix + 30 * 60;
+  if (kind === 'pre-10m') return triggerUnix + 10 * 60;
+  return triggerUnix;
 }
 
 async function processGuildReminders(client, guildId, config) {
@@ -105,10 +112,16 @@ async function processGuildReminders(client, guildId, config) {
     }
 
     for (const trigger of triggerSlots) {
+      // Deduplicate by slot key to avoid repeated sends in the same trigger window.
+      if (String(reminder.lastTriggeredKey || '') === String(trigger.slotKey || '')) {
+        continue;
+      }
+
       const slot = parseReminderSlotKey(trigger.slotKey);
-      const eventUnix = slot
+      const triggerUnixFromSlot = slot
         ? findUnixForLocalTime(slot.dateKey, slot.hour, slot.minute, reminderTimezone)
         : null;
+      const eventUnix = resolveEventStartUnix(triggerUnixFromSlot, trigger.kind);
       const endUnix = Number.isFinite(eventUnix) && Number.isInteger(reminder.durationSeconds)
         ? eventUnix + reminder.durationSeconds
         : null;
@@ -119,8 +132,8 @@ async function processGuildReminders(client, guildId, config) {
         : '';
       const kindLabel = trigger.kind === 'pre-30m'
         ? '\n🕒 提前 30 分钟提醒'
-        : trigger.kind === 'pre-5m'
-          ? '\n🕒 提前 5 分钟提醒'
+        : trigger.kind === 'pre-10m'
+          ? '\n🕒 提前 10 分钟提醒'
           : '';
 
       try {
