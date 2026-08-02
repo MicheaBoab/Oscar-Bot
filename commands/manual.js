@@ -24,6 +24,7 @@ const MANUALS = {
     '1. `/showqueue`  - 查看当前追踪到的市场队列状态。',
     '2. `/watch add` | `/watch list` | `/watch remove`  - 管理你的关注物品。',
     '3. `/reminder set-channel` | `/reminder set-role` | `/reminder add`  - 配置固定时间自动提醒。',
+    '4. `/reminder sync-daynight phase:pm time:10:40`  - 按游戏内时间同步日夜看板。',
     '',
     '### Tips',
     '- `offset` 支持：`+10m` / `-30s` / `+2h` / `-1d`',
@@ -91,6 +92,7 @@ const MANUALS = {
     '- `/watch list`：查看关注清单。',
     '- `/watch remove item_name:<物品名> [enhancement]`：移除关注。',
     '- `/setwatch`：调整提醒规则。',
+    '- `/reminder sync-daynight phase:<am/pm> time:<12小时制时间>`：按分段函数同步日夜看板。',
     '',
     '### add 参数',
     '- 格式：`item_name:<名称> [enhancement:<强化>]`',
@@ -154,6 +156,7 @@ const MANUALS = {
     '- `/stopqueue`：停止队列任务。',
     '- `/watch add|list|remove`：管理关注项。',
     '- `/setwatch`：配置提醒策略。',
+    '- `/reminder sync-daynight phase:<am/pm> time:<12小时制时间>`：按游戏内时间同步日夜看板。',
     '- `/reminder set-channel|set-role|refresh-board|add|edit|list|remove`：管理固定时间自动提醒与倒计时看板。',
   ],
 };

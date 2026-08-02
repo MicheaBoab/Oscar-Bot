@@ -12,6 +12,7 @@ const {
   setReminderChannel,
   setReminderRole,
   setReminderBoardChannel,
+  setReminderDayNightSyncAnchor,
   addReminder,
   getGuildReminders,
   removeReminder,
@@ -48,6 +49,13 @@ const TIMEZONE_MARKER_MAP = {
   PDT: 'America/Los_Angeles',
 };
 
+const BD_DAY_SECONDS = 3 * 60 * 60 + 20 * 60;
+const BD_NIGHT_SECONDS = 40 * 60;
+const GAME_DAY_START_MINUTES = 7 * 60;
+const GAME_NIGHT_START_MINUTES = 22 * 60;
+const GAME_DAY_MINUTES = 15 * 60;
+const GAME_NIGHT_MINUTES = 9 * 60;
+
 function resolveTimezoneCode(markerRaw) {
   if (!markerRaw) return null;
   const upperMarker = String(markerRaw).trim().toUpperCase();
@@ -68,6 +76,72 @@ function buildRoleMentionText(roleIds = []) {
     .filter(Boolean)
     .map(id => `<@&${id}>`)
     .join(' ');
+}
+
+function parseSyncGameTimeInput(phaseInput, timeInput) {
+  const phase = String(phaseInput || '').trim().toLowerCase();
+  if (phase !== 'am' && phase !== 'pm') {
+    return { ok: false, error: '❌ phase 只能是 am 或 pm。' };
+  }
+
+  const normalized = String(timeInput || '')
+    .trim()
+    .replace(/[：﹕︓]/g, ':')
+    .replace(/\./g, ':');
+
+  if (!normalized) {
+    return { ok: false, error: '❌ 当前游戏内时间不能为空，请使用例如 7:31、12:05。' };
+  }
+
+  if (/(^|\s)(AM|PM)($|\s)/i.test(normalized)) {
+    return { ok: false, error: '❌ 不需要再输入 AM/PM，phase 已经提供。' };
+  }
+
+  const match = normalized.match(/^(\d{1,2}):(\d{1,2})$/);
+  if (!match) {
+    return { ok: false, error: '❌ 时间格式无效，请使用 12 小时制，例如 7:31、12:05。' };
+  }
+
+  const hour12 = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour12) || hour12 < 1 || hour12 > 12) {
+    return { ok: false, error: '❌ 12 小时制下，小时必须介于 1 到 12。' };
+  }
+  if (!Number.isInteger(minute) || minute < 0 || minute > 59) {
+    return { ok: false, error: '❌ 分钟必须介于 00 到 59。' };
+  }
+
+  const hour24 = phase === 'am'
+    ? (hour12 === 12 ? 0 : hour12)
+    : (hour12 === 12 ? 12 : hour12 + 12);
+
+  return {
+    ok: true,
+    phase,
+    hour12,
+    hour24,
+    minute,
+    displayTime: `${phase} ${hour12}:${String(minute).padStart(2, '0')}`,
+  };
+}
+
+function getCycleSecondsFromGameClock(hour24, minute) {
+  const gameMinutes = (Number(hour24) * 60) + Number(minute);
+
+  if (gameMinutes >= GAME_DAY_START_MINUTES && gameMinutes < GAME_NIGHT_START_MINUTES) {
+    const dayElapsedMinutes = gameMinutes - GAME_DAY_START_MINUTES;
+    return Math.floor((dayElapsedMinutes / GAME_DAY_MINUTES) * BD_DAY_SECONDS);
+  }
+
+  const nightElapsedMinutes = gameMinutes >= GAME_NIGHT_START_MINUTES
+    ? gameMinutes - GAME_NIGHT_START_MINUTES
+    : gameMinutes + (24 * 60 - GAME_NIGHT_START_MINUTES);
+  const nightCycleSeconds = Math.floor((nightElapsedMinutes / GAME_NIGHT_MINUTES) * BD_NIGHT_SECONDS);
+  return BD_DAY_SECONDS + nightCycleSeconds;
+}
+
+function getGamePeriodLabel(hour24) {
+  return (hour24 >= 7 && hour24 < 22) ? '白天' : '夜晚';
 }
 
 function parseDotDateToIso(value) {
@@ -514,6 +588,27 @@ module.exports = {
     )
     .addSubcommand(subcommand =>
       subcommand
+        .setName('sync-daynight')
+        .setDescription('按当前游戏内时间同步日夜看板')
+        .addStringOption(option =>
+          option
+            .setName('phase')
+            .setDescription('游戏内阶段（am 或 pm）')
+            .setRequired(true)
+            .addChoices(
+              { name: 'am', value: 'am' },
+              { name: 'pm', value: 'pm' },
+            )
+        )
+        .addStringOption(option =>
+          option
+            .setName('time')
+            .setDescription('游戏内时间（12小时制），示例：7:31、12:05')
+            .setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
         .setName('add')
         .setDescription('打开弹窗，一次性填写 reminder')
     )
@@ -640,6 +735,37 @@ module.exports = {
       } catch (error) {
         await interaction.editReply('❌ 刷新看板失败。请确认已设置 /reminder set-board-channel，并检查 bot 权限。');
       }
+      return;
+    }
+
+    if (subcommand === 'sync-daynight') {
+      const phase = interaction.options.getString('phase', true);
+      const rawTime = interaction.options.getString('time', true);
+      const parsed = parseSyncGameTimeInput(phase, rawTime);
+      if (!parsed.ok) {
+        await interaction.reply({
+          content: parsed.error,
+          flags: 64,
+        });
+        return;
+      }
+
+      const cycleSeconds = getCycleSecondsFromGameClock(parsed.hour24, parsed.minute);
+      setReminderDayNightSyncAnchor(guildId, Date.now() / 1000, cycleSeconds);
+
+      await interaction.reply({
+        content: [
+          '✅ 已按分段函数同步日夜看板。',
+          `- 输入：${parsed.displayTime}`,
+          `- 对应游戏时段：${getGamePeriodLabel(parsed.hour24)}`,
+          '- 你可以立刻执行 `/reminder refresh-board` 看最新倒计时。',
+        ].join('\n'),
+        flags: 64,
+      });
+
+      forceRefreshReminderBoard(guildId).catch(error =>
+        console.error('[reminder] sync-daynight 后刷新看板失败:', error.message)
+      );
       return;
     }
 

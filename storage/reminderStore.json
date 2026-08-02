@@ -2,6 +2,13 @@
   "1073767351465553961": {
     "channelId": "1494417706609283273",
     "roleId": "1502387146953199717",
+    "roleIds": [
+      "1502387146953199717"
+    ],
+    "dayNightAnchor": {
+      "unix": 1785701328,
+      "cycleSeconds": 13759
+    },
     "timezone": "Asia/Taipei",
     "boardChannelId": "1494417706609283273",
     "boardMessageId": "1531416916588101760",
