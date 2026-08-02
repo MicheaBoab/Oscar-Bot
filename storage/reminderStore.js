@@ -9,6 +9,7 @@ const {
 
 const STORE_PATH = path.join(__dirname, 'reminderStore.json');
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const BD_CYCLE_SECONDS = 4 * 60 * 60;
 
 function normalizeKey(value) {
   return String(value || '').trim().toLowerCase();
@@ -81,6 +82,27 @@ function normalizeRoleIds(rawValue) {
   return [];
 }
 
+function normalizeDayNightAnchor(raw) {
+  const objectUnix = Number(raw?.dayNightAnchor?.unix);
+  const objectCycleSeconds = Number(raw?.dayNightAnchor?.cycleSeconds);
+
+  const normalizedUnix = Number.isFinite(objectUnix) && objectUnix > 0
+    ? Math.trunc(objectUnix)
+    : null;
+  const normalizedCycleSecondsRaw = Number.isFinite(objectCycleSeconds)
+    ? Math.trunc(objectCycleSeconds)
+    : null;
+
+  if (!Number.isFinite(normalizedUnix) || normalizedUnix <= 0 || !Number.isFinite(normalizedCycleSecondsRaw)) {
+    return null;
+  }
+
+  return {
+    unix: normalizedUnix,
+    cycleSeconds: ((normalizedCycleSecondsRaw % BD_CYCLE_SECONDS) + BD_CYCLE_SECONDS) % BD_CYCLE_SECONDS,
+  };
+}
+
 function normalizeGuildConfig(raw) {
   const reminders = Array.isArray(raw?.reminders)
     ? raw.reminders.map(normalizeReminder).filter(Boolean)
@@ -90,6 +112,7 @@ function normalizeGuildConfig(raw) {
     channelId: typeof raw?.channelId === 'string' ? raw.channelId : null,
     roleId: typeof raw?.roleId === 'string' ? raw.roleId : null,
     roleIds: normalizeRoleIds(raw?.roleIds || raw?.roleId),
+    dayNightAnchor: normalizeDayNightAnchor(raw),
     timezone: typeof raw?.timezone === 'string' && raw.timezone.trim()
       ? raw.timezone.trim()
       : DEFAULT_REMINDER_TIMEZONE,
@@ -187,6 +210,25 @@ function setReminderBoardChannel(guildId, channelId) {
   return store[guildKey];
 }
 
+function setReminderDayNightSyncAnchor(guildId, anchorUnix, anchorCycleSeconds) {
+  const store = loadStore();
+  const guildKey = normalizeKey(guildId);
+  if (!ensureGuild(store, guildKey)) return null;
+
+  const parsedAnchorUnix = Number(anchorUnix);
+  const parsedAnchorCycleSeconds = Number(anchorCycleSeconds);
+  const normalizedAnchor = Number.isFinite(parsedAnchorUnix) && parsedAnchorUnix > 0 && Number.isFinite(parsedAnchorCycleSeconds)
+    ? {
+      unix: Math.trunc(parsedAnchorUnix),
+      cycleSeconds: ((Math.trunc(parsedAnchorCycleSeconds) % BD_CYCLE_SECONDS) + BD_CYCLE_SECONDS) % BD_CYCLE_SECONDS,
+    }
+    : null;
+
+  store[guildKey].dayNightAnchor = normalizedAnchor;
+  saveStore(store);
+  return store[guildKey];
+}
+
 function updateReminderBoardMessageId(guildId, messageId) {
   const store = loadStore();
   const guildKey = normalizeKey(guildId);
@@ -278,6 +320,7 @@ module.exports = {
   setReminderRole,
   setReminderTimezone,
   setReminderBoardChannel,
+  setReminderDayNightSyncAnchor,
   updateReminderBoardMessageId,
   addReminder,
   getGuildReminders,

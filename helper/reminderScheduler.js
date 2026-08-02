@@ -8,14 +8,16 @@ const {
   buildReminderSlotKey,
   computeNextReminderOccurrenceUnix,
   getZonedDateParts,
-  matchesReminderDate,
-  isReminderActiveOnDate,
   parseReminderSlotKey,
   findUnixForLocalTime,
 } = require('./reminderUtils');
 
 const CHECK_INTERVAL_MS = 30 * 1000;
 const BOARD_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
+const BD_DAY_SECONDS = 3 * 60 * 60 + 20 * 60;
+const BD_NIGHT_SECONDS = 40 * 60;
+const BD_CYCLE_SECONDS = BD_DAY_SECONDS + BD_NIGHT_SECONDS;
+const BD_UTC_OFFSET_SECONDS = 3 * 60 * 60 + 40 * 60;
 let schedulerClient = null;
 let schedulerTimer = null;
 let schedulerInFlight = false;
@@ -66,6 +68,42 @@ function resolveEventStartUnix(triggerUnix, kind) {
   if (kind === 'pre-30m') return triggerUnix + 30 * 60;
   if (kind === 'pre-10m') return triggerUnix + 10 * 60;
   return triggerUnix;
+}
+
+function getDayNightSummary(now = new Date(), config = {}) {
+  const nowSeconds = now.getTime() / 1000;
+  const anchorUnix = Number(config.dayNightAnchor?.unix);
+  const anchorCycleSeconds = Number(config.dayNightAnchor?.cycleSeconds);
+  let cycleSeconds;
+
+  if (Number.isFinite(anchorUnix) && anchorUnix > 0 && Number.isFinite(anchorCycleSeconds)) {
+    cycleSeconds = anchorCycleSeconds + (nowSeconds - anchorUnix);
+  } else {
+    const utcMidnightSeconds = Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+    ) / 1000;
+    cycleSeconds = ((nowSeconds - utcMidnightSeconds) + BD_UTC_OFFSET_SECONDS);
+  }
+
+  cycleSeconds = ((cycleSeconds % BD_CYCLE_SECONDS) + BD_CYCLE_SECONDS) % BD_CYCLE_SECONDS;
+  const currentType = cycleSeconds < BD_DAY_SECONDS ? 'day' : 'night';
+  const secondsUntilNextCycle = currentType === 'day'
+    ? BD_DAY_SECONDS - cycleSeconds
+    : BD_CYCLE_SECONDS - cycleSeconds;
+  const secondsUntilNextOpposite = secondsUntilNextCycle + (currentType === 'day' ? BD_NIGHT_SECONDS : BD_DAY_SECONDS);
+  const nextCycleUnix = Math.floor(nowSeconds + secondsUntilNextCycle);
+  const nextOppositeUnix = Math.floor(nowSeconds + secondsUntilNextOpposite);
+
+  return {
+    currentType,
+    currentLabel: currentType === 'day' ? '☀️ 白天' : '🌙 夜晚',
+    firstLabel: currentType === 'day' ? '🌙 夜晚还有' : '☀️ 白天还有',
+    secondLabel: currentType === 'day' ? '☀️ 下一个白天还有' : '🌙 下一个夜晚还有',
+    firstCountdown: `<t:${nextCycleUnix}:R>`,
+    secondCountdown: `<t:${nextOppositeUnix}:R>`,
+  };
 }
 
 async function processGuildReminders(client, guildId, config) {
@@ -165,12 +203,20 @@ function buildBoardEmbed(guildId, config, nowUnix) {
       return { reminder, nextUnix };
     })
     .filter(entry => Number.isFinite(entry.nextUnix))
-    .sort((a, b) => a.nextUnix - b.nextUnix)
     .slice(0, 20);
 
+  const dayNightSummary = getDayNightSummary(new Date(nowUnix * 1000), config);
+
   const descriptionLines = [
-    `最后更新：<t:${nowUnix}:F>`,
+    `🕒 最后更新：<t:${nowUnix}:R>`,
+    '⚠️ 日夜提示为规则推算，仅为大概时间，非绝对准确，请以游戏内时间为准。',
     '',
+    '## 日夜提示',
+    `- 当前：${dayNightSummary.currentLabel}`,
+    `- ${dayNightSummary.firstLabel}：${dayNightSummary.firstCountdown}`,
+    `- ${dayNightSummary.secondLabel}：${dayNightSummary.secondCountdown}`,
+    '',
+    '## 活动提醒',
   ];
 
   if (entries.length === 0) {
