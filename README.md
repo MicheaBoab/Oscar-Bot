@@ -5,6 +5,7 @@ Oscar-Bot 是一个基于 discord.js v14 的模块化 Discord 机器人。
 当前主要功能包括：
 
 - 投票系统
+- Reaction 报名帖
 - 报名与查询流程
 - 黑沙（BDO）世界市场队列追踪
 - 关注通知（watch）
@@ -14,6 +15,7 @@ Oscar-Bot 是一个基于 discord.js v14 的模块化 Discord 机器人。
 ## 核心特性
 
 - 全部采用 Slash Commands
+- reaction 报名人数会随加减 reaction 自动更新
 - 投票数据持久化，重启后可恢复
 - 市场队列与 watch 自动调度
 - reminder 固定时间自动调度
@@ -39,6 +41,13 @@ Oscar-Bot 是一个基于 discord.js v14 的模块化 Discord 机器人。
 - `/createpoll`：创建投票
 - `/listpolls`：查看进行中投票
 - `/endpoll`：提前结束并结算
+
+### Reaction 报名
+
+- `/attendance create`：创建报名帖
+- `/attendance list`：查看进行中的报名帖（仅管理员）
+- `/attendance participants`：查看某个报名帖当前所有报名者，或用 `public:true` 公开 @ 名单
+- `/attendance end`：手动结束报名帖（仅管理员或创建者）
 
 ### 报名与查询
 
@@ -127,6 +136,10 @@ Oscar-Bot 是一个基于 discord.js v14 的模块化 Discord 机器人。
 ```text
 /announce role:raid text:night_raid force:true
 ```
+
+## TODO
+
+- 将 `/announce` 与 reaction 报名联动，例如支持在发送活动公告时自动附带报名 reaction。
 
 ## 数据存储说明
 

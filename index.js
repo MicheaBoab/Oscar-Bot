@@ -1,12 +1,16 @@
 const fs = require('fs');
 const path = require('path');
-const { Client, GatewayIntentBits, Events, Collection, EmbedBuilder} = require('discord.js');
+const { Client, GatewayIntentBits, Events, Collection, EmbedBuilder, Partials } = require('discord.js');
 
 require("dotenv").config();
 const { listPolls, loadPoll } = require('./storage/pollFileStore');
 const { initializeCodexAutoUpdate } = require('./storage/codexItemStore');
 const { startLiveQueueScheduler } = require('./helper/liveQueueScheduler');
 const { startReminderScheduler } = require('./helper/reminderScheduler');
+const {
+  updateAttendance,
+  findAttendanceByMessage,
+} = require('./storage/attendanceStore');
 
 const pollTiles = listPolls();
 console.log(`♻️ 恢复 ${pollTiles.length} 个投票`);
@@ -59,6 +63,20 @@ function buildDisabledEmbed(poll) {
     .setDescription('⏱️ 该投票已到期结束，无法继续投票。')
     .setFields(fields)
     .setColor(0x99AAB5);
+}
+
+async function syncAttendanceMessage(client, attendanceCommand, attendance) {
+  if (!attendanceCommand || !attendance?.channelId || !attendance?.messageId) return;
+
+  try {
+    const channel = await client.channels.fetch(attendance.channelId);
+    if (!channel || !channel.isTextBased()) return;
+
+    const message = await channel.messages.fetch(attendance.messageId);
+    await message.edit({ embeds: [attendanceCommand.buildAttendanceEmbed(attendance)] });
+  } catch (error) {
+    console.error('[attendance] 更新报名帖失败:', error.message);
+  }
 }
 
 async function closeExpiredPolls(client = null, reason = 'startup') {
@@ -120,7 +138,12 @@ async function closeExpiredPolls(client = null, reason = 'startup') {
 closeExpiredPolls(null, 'startup');
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMessageReactions,
+  ],
+  partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
 
 // 存放所有命令
@@ -144,6 +167,49 @@ client.once(Events.ClientReady, () => {
     () => closeExpiredPolls(client, 'interval').catch(err => console.error('[poll] 定时检查失败:', err)),
     15 * 1000,
   );
+});
+
+async function handleAttendanceReaction(client, reaction, user, isAdd) {
+  if (user.bot) return;
+
+  try {
+    if (reaction.partial) {
+      await reaction.fetch();
+    }
+  } catch {
+    return;
+  }
+
+  const match = findAttendanceByMessage(reaction.message.id);
+  if (!match) return;
+
+  const { title, attendance } = match;
+  if (!attendance || attendance.status !== 'active') return;
+  if (reaction.emoji.name !== attendance.emoji) return;
+
+  if (!attendance.participants || typeof attendance.participants !== 'object') {
+    attendance.participants = {};
+  }
+
+  if (isAdd) {
+    const member = reaction.message.guild?.members?.cache?.get(user.id) || null;
+    attendance.participants[user.id] = member?.displayName || user.username;
+  } else {
+    delete attendance.participants[user.id];
+  }
+
+  updateAttendance(title, attendance);
+
+  const attendanceCommand = client.commands.get('attendance');
+  await syncAttendanceMessage(client, attendanceCommand, attendance);
+}
+
+client.on(Events.MessageReactionAdd, async (reaction, user) => {
+  await handleAttendanceReaction(client, reaction, user, true);
+});
+
+client.on(Events.MessageReactionRemove, async (reaction, user) => {
+  await handleAttendanceReaction(client, reaction, user, false);
 });
 
 client.on(Events.InteractionCreate, async interaction => {
