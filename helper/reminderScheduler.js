@@ -38,8 +38,6 @@ function getTriggeredSlots(reminder, timezone, now = new Date()) {
 
   const nowParts = getZonedDateParts(now, timezone);
   const triggerCandidates = [
-    { kind: 'main', unix: nextUnix },
-    { kind: 'pre-30m', unix: nextUnix - 30 * 60 },
     { kind: 'pre-10m', unix: nextUnix - 10 * 60 },
   ];
 
@@ -65,7 +63,6 @@ function getTriggeredSlot(reminder, timezone, now = new Date()) {
 
 function resolveEventStartUnix(triggerUnix, kind) {
   if (!Number.isFinite(triggerUnix)) return null;
-  if (kind === 'pre-30m') return triggerUnix + 30 * 60;
   if (kind === 'pre-10m') return triggerUnix + 10 * 60;
   return triggerUnix;
 }
@@ -168,11 +165,9 @@ async function processGuildReminders(client, guildId, config) {
           ? `\n📅 活动时间：<t:${eventUnix}:F> - <t:${endUnix}:t>（<t:${eventUnix}:R>）`
           : `\n📅 活动时间：<t:${eventUnix}:F>（<t:${eventUnix}:R>）`
         : '';
-      const kindLabel = trigger.kind === 'pre-30m'
-        ? '\n🕒 提前 30 分钟提醒'
-        : trigger.kind === 'pre-10m'
-          ? '\n🕒 提前 10 分钟提醒'
-          : '';
+      const kindLabel = trigger.kind === 'pre-10m'
+        ? '\n🕒 提前 10 分钟提醒'
+        : '';
 
       try {
         await channel.send({
