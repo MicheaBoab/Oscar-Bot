@@ -7,10 +7,7 @@ const { listPolls, loadPoll } = require('./storage/pollFileStore');
 const { initializeCodexAutoUpdate } = require('./storage/codexItemStore');
 const { startLiveQueueScheduler } = require('./helper/liveQueueScheduler');
 const { startReminderScheduler } = require('./helper/reminderScheduler');
-const {
-  updateAttendance,
-  findAttendanceByMessage,
-} = require('./storage/attendanceStore');
+const { loadAllAttendances } = require('./storage/attendanceStore');
 
 const pollTiles = listPolls();
 console.log(`♻️ 恢复 ${pollTiles.length} 个投票`);
@@ -72,10 +69,28 @@ async function syncAttendanceMessage(client, attendanceCommand, attendance) {
     const channel = await client.channels.fetch(attendance.channelId);
     if (!channel || !channel.isTextBased()) return;
 
+    let guild = null;
+    if (attendance.guildId) {
+      guild = await client.guilds.fetch(attendance.guildId).catch(() => null);
+    }
+
     const message = await channel.messages.fetch(attendance.messageId);
-    await message.edit({ embeds: [attendanceCommand.buildAttendanceEmbed(attendance)] });
+    await message.edit({
+      embeds: [attendanceCommand.buildAttendanceEmbed(attendance)],
+      components: attendanceCommand.buildAttendanceComponents(attendance, guild),
+    });
   } catch (error) {
     console.error('[attendance] 更新报名帖失败:', error.message);
+  }
+}
+
+async function refreshActiveAttendanceMessages(client) {
+  const attendanceCommand = client.commands.get('attendance');
+  if (!attendanceCommand) return;
+
+  for (const { data: attendance } of loadAllAttendances()) {
+    if (attendance.status !== 'active') continue;
+    await syncAttendanceMessage(client, attendanceCommand, attendance);
   }
 }
 
@@ -141,9 +156,8 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.GuildMessageReactions,
   ],
-  partials: [Partials.Message, Partials.Channel, Partials.Reaction],
+  partials: [Partials.Message, Partials.Channel],
 });
 
 // 存放所有命令
@@ -163,53 +177,11 @@ client.once(Events.ClientReady, () => {
   console.log(`🤖 Logged in as ${client.user.tag}`);
   startLiveQueueScheduler(client);
   startReminderScheduler(client);
+  refreshActiveAttendanceMessages(client);
   setInterval(
     () => closeExpiredPolls(client, 'interval').catch(err => console.error('[poll] 定时检查失败:', err)),
     15 * 1000,
   );
-});
-
-async function handleAttendanceReaction(client, reaction, user, isAdd) {
-  if (user.bot) return;
-
-  try {
-    if (reaction.partial) {
-      await reaction.fetch();
-    }
-  } catch {
-    return;
-  }
-
-  const match = findAttendanceByMessage(reaction.message.id);
-  if (!match) return;
-
-  const { title, attendance } = match;
-  if (!attendance || attendance.status !== 'active') return;
-  if (reaction.emoji.name !== attendance.emoji) return;
-
-  if (!attendance.participants || typeof attendance.participants !== 'object') {
-    attendance.participants = {};
-  }
-
-  if (isAdd) {
-    const member = reaction.message.guild?.members?.cache?.get(user.id) || null;
-    attendance.participants[user.id] = member?.displayName || user.username;
-  } else {
-    delete attendance.participants[user.id];
-  }
-
-  updateAttendance(title, attendance);
-
-  const attendanceCommand = client.commands.get('attendance');
-  await syncAttendanceMessage(client, attendanceCommand, attendance);
-}
-
-client.on(Events.MessageReactionAdd, async (reaction, user) => {
-  await handleAttendanceReaction(client, reaction, user, true);
-});
-
-client.on(Events.MessageReactionRemove, async (reaction, user) => {
-  await handleAttendanceReaction(client, reaction, user, false);
 });
 
 client.on(Events.InteractionCreate, async interaction => {
@@ -250,6 +222,25 @@ client.on(Events.InteractionCreate, async interaction => {
      Button（find 分页）
      ========================= */
   if (interaction.isButton()) {
+    if (
+      interaction.customId === 'attendance_join'
+      || interaction.customId === 'attendance_next_time'
+      || interaction.customId === 'attendance_cancel'
+    ) {
+      try {
+        const attendanceCommand = client.commands.get('attendance');
+        if (attendanceCommand && typeof attendanceCommand.handleAttendanceButton === 'function') {
+          await attendanceCommand.handleAttendanceButton(interaction);
+        }
+      } catch (error) {
+        console.error('[attendance] 处理报名按钮失败:', error);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '❌ 报名操作失败，请稍后再试。', flags: 64 });
+        }
+      }
+      return;
+    }
+
     if (interaction.customId.startsWith('findall_page:')) {
       try {
         const findAllCommand = client.commands.get('findall');
@@ -298,6 +289,21 @@ client.on(Events.InteractionCreate, async interaction => {
      Select Menu（投票逻辑）
      ========================= */
   if (interaction.isStringSelectMenu()) {
+    if (interaction.customId.startsWith('attendance_class:')) {
+      try {
+        const attendanceCommand = client.commands.get('attendance');
+        if (attendanceCommand && typeof attendanceCommand.handleAttendanceClassSelection === 'function') {
+          await attendanceCommand.handleAttendanceClassSelection(interaction);
+        }
+      } catch (error) {
+        console.error('[attendance] 处理报名选择失败:', error);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '❌ 报名选择失败，请稍后再试。', flags: 64 });
+        }
+      }
+      return;
+    }
+
     if(!interaction.customId.startsWith('poll_select:')) return;
 
     const {
