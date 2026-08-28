@@ -30,3 +30,4 @@ Thumbs.db
 # Runtime data
 storage/*
 !storage/attendanceStore.js
+!storage/attendanceSettingsStore.js

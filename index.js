@@ -76,7 +76,7 @@ async function syncAttendanceMessage(client, attendanceCommand, attendance) {
 
     const message = await channel.messages.fetch(attendance.messageId);
     await message.edit({
-      embeds: [attendanceCommand.buildAttendanceEmbed(attendance)],
+      embeds: [attendanceCommand.buildAttendanceEmbed(attendance, { guild })],
       components: attendanceCommand.buildAttendanceComponents(attendance, guild),
     });
   } catch (error) {
@@ -222,6 +222,36 @@ client.on(Events.InteractionCreate, async interaction => {
      Button（find 分页）
      ========================= */
   if (interaction.isButton()) {
+    if (interaction.customId === 'attendance_specialization_change') {
+      try {
+        const attendanceCommand = client.commands.get('attendance');
+        if (attendanceCommand && typeof attendanceCommand.handleAttendanceSpecializationChange === 'function') {
+          await attendanceCommand.handleAttendanceSpecializationChange(interaction);
+        }
+      } catch (error) {
+        console.error('[attendance] 打开职业路线选择失败:', error);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '❌ 无法打开职业路线选择，请稍后再试。', flags: 64 });
+        }
+      }
+      return;
+    }
+
+    if (interaction.customId.startsWith('attendance_specialization:')) {
+      try {
+        const attendanceCommand = client.commands.get('attendance');
+        if (attendanceCommand && typeof attendanceCommand.handleAttendanceSpecialization === 'function') {
+          await attendanceCommand.handleAttendanceSpecialization(interaction);
+        }
+      } catch (error) {
+        console.error('[attendance] 处理职业形态选择失败:', error);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '❌ 职业形态选择失败，请稍后再试。', flags: 64 });
+        }
+      }
+      return;
+    }
+
     if (
       interaction.customId === 'attendance_join'
       || interaction.customId === 'attendance_next_time'
@@ -236,6 +266,48 @@ client.on(Events.InteractionCreate, async interaction => {
         console.error('[attendance] 处理报名按钮失败:', error);
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: '❌ 报名操作失败，请稍后再试。', flags: 64 });
+        }
+      }
+      return;
+    }
+
+    if (interaction.customId.startsWith('attendance_close_confirm:')) {
+      try {
+        const attendanceCommand = client.commands.get('attendance');
+        if (attendanceCommand && typeof attendanceCommand.handleAttendanceCloseConfirm === 'function') {
+          await attendanceCommand.handleAttendanceCloseConfirm(interaction);
+        }
+      } catch (error) {
+        console.error('[attendance] 处理关闭报名确认失败:', error);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '❌ 关闭报名失败，请稍后再试。', flags: 64 });
+        }
+      }
+      return;
+    }
+
+    if (interaction.customId === 'attendance_close_cancel') {
+      try {
+        const attendanceCommand = client.commands.get('attendance');
+        if (attendanceCommand && typeof attendanceCommand.handleAttendanceCloseCancel === 'function') {
+          await attendanceCommand.handleAttendanceCloseCancel(interaction);
+        }
+      } catch (error) {
+        console.error('[attendance] 取消关闭报名失败:', error);
+      }
+      return;
+    }
+
+    if (interaction.customId.startsWith('attendance_group_action:')) {
+      try {
+        const attendanceCommand = client.commands.get('attendance');
+        if (attendanceCommand && typeof attendanceCommand.handleGroupPanelAction === 'function') {
+          await attendanceCommand.handleGroupPanelAction(interaction);
+        }
+      } catch (error) {
+        console.error('[attendance] 处理分队面板按钮失败:', error);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '❌ 分队操作失败，请稍后再试。', flags: 64 });
         }
       }
       return;
@@ -299,6 +371,66 @@ client.on(Events.InteractionCreate, async interaction => {
         console.error('[attendance] 处理报名选择失败:', error);
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: '❌ 报名选择失败，请稍后再试。', flags: 64 });
+        }
+      }
+      return;
+    }
+
+    if (interaction.customId === 'attendance_admin_menu') {
+      try {
+        const attendanceCommand = client.commands.get('attendance');
+        if (attendanceCommand && typeof attendanceCommand.handleAttendanceAdminMenu === 'function') {
+          await attendanceCommand.handleAttendanceAdminMenu(interaction);
+        }
+      } catch (error) {
+        console.error('[attendance] 处理管理员操作菜单失败:', error);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '❌ 操作失败，请稍后再试。', flags: 64 });
+        }
+      }
+      return;
+    }
+
+    if (interaction.customId.startsWith('attendance_group_delete_select:')) {
+      try {
+        const attendanceCommand = client.commands.get('attendance');
+        if (attendanceCommand && typeof attendanceCommand.handleGroupDeleteSelect === 'function') {
+          await attendanceCommand.handleGroupDeleteSelect(interaction);
+        }
+      } catch (error) {
+        console.error('[attendance] 处理删除队伍失败:', error);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '❌ 删除队伍失败，请稍后再试。', flags: 64 });
+        }
+      }
+      return;
+    }
+
+    if (interaction.customId.startsWith('attendance_group_target_select:')) {
+      try {
+        const attendanceCommand = client.commands.get('attendance');
+        if (attendanceCommand && typeof attendanceCommand.handleGroupTargetSelect === 'function') {
+          await attendanceCommand.handleGroupTargetSelect(interaction);
+        }
+      } catch (error) {
+        console.error('[attendance] 处理目标队伍选择失败:', error);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '❌ 选择队伍失败，请稍后再试。', flags: 64 });
+        }
+      }
+      return;
+    }
+
+    if (interaction.customId.startsWith('attendance_group_user_select:')) {
+      try {
+        const attendanceCommand = client.commands.get('attendance');
+        if (attendanceCommand && typeof attendanceCommand.handleGroupUserSelect === 'function') {
+          await attendanceCommand.handleGroupUserSelect(interaction);
+        }
+      } catch (error) {
+        console.error('[attendance] 处理分配成员失败:', error);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '❌ 分配成员失败，请稍后再试。', flags: 64 });
         }
       }
       return;
@@ -377,10 +509,46 @@ client.on(Events.InteractionCreate, async interaction => {
     await interaction.editReply({embeds: [newEmbed]});
   }
 
+  if (interaction.isChannelSelectMenu()) {
+    if (interaction.customId.startsWith('attendance_group_channel_select:')) {
+      try {
+        const attendanceCommand = client.commands.get('attendance');
+        if (attendanceCommand && typeof attendanceCommand.handleGroupChannelSelect === 'function') {
+          await attendanceCommand.handleGroupChannelSelect(interaction);
+        }
+      } catch (error) {
+        console.error('[attendance] 处理分组频道选择失败:', error);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '❌ 分组频道设置失败，请稍后再试。', flags: 64 });
+        }
+      }
+    }
+    return;
+  }
+
   /* =========================
      Modal Submit（notice）
      ========================= */
   if (interaction.isModalSubmit()) {
+    if (interaction.customId.startsWith('attendance_group_create_modal:')) {
+      try {
+        const attendanceCommand = client.commands.get('attendance');
+        if (attendanceCommand && typeof attendanceCommand.handleGroupCreateModalSubmit === 'function') {
+          await attendanceCommand.handleGroupCreateModalSubmit(interaction);
+        }
+      } catch (error) {
+        console.error('[attendance] 处理新建队伍失败:', error);
+        if (!interaction.replied && !interaction.deferred) {
+          try {
+            await interaction.reply({ content: '❌ 新建队伍失败，请稍后再试。', flags: 64 });
+          } catch (replyError) {
+            console.error(replyError);
+          }
+        }
+      }
+      return;
+    }
+
     if (interaction.customId.startsWith('notice_add_modal_') || interaction.customId.startsWith('notice_edit_modal_')) {
       try {
         const noticeCommand = client.commands.get('notice');

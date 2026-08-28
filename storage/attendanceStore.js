@@ -47,6 +47,19 @@ function safeSlug(value) {
     .replace(/\s+/g, '_');
 }
 
+function sanitizeGroups(groups) {
+  if (!Array.isArray(groups)) return [];
+
+  return groups
+    .filter(group => group && typeof group === 'object' && typeof group.id === 'string' && group.id)
+    .map(group => ({
+      id: group.id,
+      label: String(group.label || group.id).slice(0, 80),
+      capacity: Number.isFinite(group.capacity) && group.capacity > 0 ? Math.floor(group.capacity) : null,
+      memberIds: Array.isArray(group.memberIds) ? group.memberIds.map(String) : [],
+    }));
+}
+
 ensureDirectory(ATTENDANCE_DIR);
 ensureDirectory(ARCHIVE_DIR);
 
@@ -66,6 +79,8 @@ function loadAttendance(title) {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
 
   parsed.participants = sanitizeObject(parsed.participants);
+  parsed.declinedParticipants = sanitizeObject(parsed.declinedParticipants);
+  parsed.groups = sanitizeGroups(parsed.groups);
   parsed.status = parsed.status === 'ended' ? 'ended' : 'active';
   return parsed;
 }
@@ -74,6 +89,8 @@ function updateAttendance(title, data) {
   const nextData = {
     ...data,
     participants: sanitizeObject(data.participants),
+    declinedParticipants: sanitizeObject(data.declinedParticipants),
+    groups: sanitizeGroups(data.groups),
   };
 
   fs.writeFileSync(getAttendancePath(title), JSON.stringify(nextData, null, 2), 'utf-8');
@@ -107,6 +124,8 @@ function loadAllAttendances() {
       const raw = JSON.parse(fs.readFileSync(path.join(ATTENDANCE_DIR, file), 'utf-8'));
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
       raw.participants = sanitizeObject(raw.participants);
+      raw.declinedParticipants = sanitizeObject(raw.declinedParticipants);
+      raw.groups = sanitizeGroups(raw.groups);
       attendances.push({ data: raw });
     } catch (error) {
       console.error('[attendance] 读取失败:', file, error.message);
@@ -133,6 +152,19 @@ function findAttendanceByMessage(messageId) {
   return null;
 }
 
+function findAttendanceByGroupPanelMessage(messageId) {
+  if (!messageId) return null;
+
+  for (const title of listAttendances()) {
+    const attendance = loadAttendance(title);
+    if (!attendance) continue;
+    if (String(attendance.groupPanelMessageId || '') !== String(messageId)) continue;
+    return { title, attendance };
+  }
+
+  return null;
+}
+
 module.exports = {
   createAttendance,
   loadAttendance,
@@ -142,4 +174,5 @@ module.exports = {
   loadAllAttendances,
   attendanceExistsByTitle,
   findAttendanceByMessage,
+  findAttendanceByGroupPanelMessage,
 };
