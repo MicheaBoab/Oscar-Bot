@@ -69,10 +69,60 @@ test('职业报名组件包含继承觉醒和管理员操作', () => {
   const firstRowLabels = rows[0].toJSON().components.map(component => component.label);
   const adminOptions = rows.at(-1).toJSON().components[0].options.map(option => option.label);
 
-  assert.ok(firstRowLabels.includes('⚔️ 继承/觉醒'));
-  assert.ok(adminOptions.includes('🧩 分队管理'));
-  assert.ok(adminOptions.includes('📍 更新分组频道'));
-  assert.ok(adminOptions.includes('🔄 刷新玩家名称'));
+  assert.ok(firstRowLabels.includes('⚔️ 继承/觉醒 / ⚔️ Succession/Awakening'));
+  assert.ok(adminOptions.includes('🧩 分队管理 / 🧩 Manage teams'));
+  assert.ok(adminOptions.includes('📍 更新分组频道 / 📍 Set team channel'));
+  assert.ok(adminOptions.includes('🔄 刷新玩家名称 / 🔄 Refresh names'));
+});
+
+test('公开报名组件和分队面板使用中英双语', () => {
+  const data = attendance({ published: false });
+  const signupRows = attendanceCommand.buildAttendanceComponents(data).map(row => row.toJSON());
+  const signupLabels = signupRows[0].components.map(component => component.label);
+  const groupPanel = attendanceCommand.buildGroupPanelComponents(data).map(row => row.toJSON());
+  const groupLabels = groupPanel.flatMap(row => row.components.map(component => component.label));
+  const embed = attendanceCommand.buildAttendanceEmbed(data).toJSON();
+
+  assert.ok(signupLabels.includes('下次一定U•ェ•*U / Next time, for sure 😂'));
+  assert.ok(groupLabels.includes('➕ 新建队伍 / ➕ Create team'));
+  assert.equal(embed.title, '📌 活动报名 / 📌 Event signup：测试活动');
+});
+
+test('私密继承觉醒按钮按用户语言显示，缺省语言使用英文', () => {
+  const chineseButtons = attendanceCommand
+    .buildSpecializationButtons('message', 0, { locale: 'zh-CN' })
+    .toJSON().components.map(component => component.label);
+  const englishButtons = attendanceCommand
+    .buildSpecializationButtons('message', 0, { locale: 'en-US' })
+    .toJSON().components.map(component => component.label);
+  const defaultButtons = attendanceCommand
+    .buildSpecializationButtons('message', 0, {})
+    .toJSON().components.map(component => component.label);
+
+  assert.deepEqual(chineseButtons, ['🔵 继承', '🟠 觉醒', '⚪ 不适用']);
+  assert.deepEqual(englishButtons, ['🔵 Succession', '🟠 Awakening', '⚪ N/A']);
+  assert.deepEqual(defaultButtons, englishButtons);
+});
+
+test('报名结果 Footer 根据场景使用正确的双语', () => {
+  const endedEmbed = attendanceCommand.buildAttendanceResultEmbed(attendance()).toJSON();
+  const activeEmbed = attendanceCommand.buildAttendanceResultEmbed(attendance(), '当前报名名单').toJSON();
+
+  assert.equal(endedEmbed.footer.text, '该报名帖已结束 / This signup has ended');
+  assert.equal(activeEmbed.footer.text, '当前报名名单 / Current signup list');
+});
+
+test('名单无成员和截断提示使用中英双语', () => {
+  const emptyEmbed = attendanceCommand.buildAttendanceEmbed(attendance()).toJSON();
+  assert.match(emptyEmbed.fields[0].value, /（无） \/ \(None\)/u);
+
+  const participants = {};
+  for (let index = 0; index < 40; index++) {
+    participants[String(index)] = { displayName: `Player${index}`, selection: 'Dark Knight' };
+  }
+
+  const value = attendanceCommand.buildAttendanceEmbed(attendance({ participants })).toJSON().fields[0].value;
+  assert.match(value, /另有 \d+ 人未显示 \/ … \d+ more not shown/u);
 });
 
 test('长名单会安全截断并显示未显示人数', () => {

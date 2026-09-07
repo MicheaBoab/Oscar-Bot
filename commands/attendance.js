@@ -29,6 +29,15 @@ const MAX_ATTENDANCE_GROUPS = 24;
 const MAX_PARTICIPANT_FIELD_LENGTH = 1000;
 const MAX_GROUP_PANEL_VISIBLE_MEMBERS = 50;
 
+function bilingual(chinese, english) {
+  return `${chinese} / ${english}`;
+}
+
+function privateText(interaction, chinese, english) {
+  const locale = interaction.locale?.toLowerCase();
+  return locale?.startsWith('zh') ? chinese : english;
+}
+
 function isAdminInteraction(interaction) {
   return interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) === true;
 }
@@ -113,12 +122,12 @@ function getClassEmojiMarkup(selection, guild) {
 }
 
 function buildParticipantTable(userIds, attendance, guild, renderState = null) {
-  if (userIds.length === 0) return '（无）';
+  if (userIds.length === 0) return bilingual('（无）', '(None)');
 
   const rows = userIds.map(userId => {
     const participant = attendance.participants?.[userId];
     const currentMember = guild?.members?.cache?.get?.(userId);
-    const name = currentMember?.displayName || participant?.displayName || `用户${userId}`;
+    const name = currentMember?.displayName || participant?.displayName || bilingual(`用户${userId}`, `User ${userId}`);
     const selection = getParticipantSelection(participant);
     const specialization = selection === 'Shai' ? 'shai' : getParticipantSpecialization(participant);
     return { name, selection, specialization };
@@ -140,7 +149,9 @@ function buildParticipantTable(userIds, attendance, guild, renderState = null) {
   for (const line of lines) {
     if (renderState && renderState.remaining <= 0) break;
     const hiddenAfterAdding = lines.length - output.length - 1;
-    const summaryLength = hiddenAfterAdding > 0 ? `\n… 另有 ${hiddenAfterAdding} 人未显示`.length : 0;
+    const summaryLength = hiddenAfterAdding > 0
+      ? `\n${bilingual(`… 另有 ${hiddenAfterAdding} 人未显示`, `… ${hiddenAfterAdding} more not shown`)}`.length
+      : 0;
     const candidateLength = output.join('\n').length + (output.length > 0 ? 1 : 0) + line.length + summaryLength;
     if (candidateLength > MAX_PARTICIPANT_FIELD_LENGTH) break;
     output.push(line);
@@ -149,7 +160,7 @@ function buildParticipantTable(userIds, attendance, guild, renderState = null) {
 
   const hiddenCount = lines.length - output.length;
   if (hiddenCount > 0) {
-    output.push(`… 另有 ${hiddenCount} 人未显示`);
+    output.push(bilingual(`… 另有 ${hiddenCount} 人未显示`, `… ${hiddenCount} more not shown`));
   }
   return output.join('\n');
 }
@@ -222,12 +233,12 @@ function buildAdminMenuRow() {
   return new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId('attendance_admin_menu')
-      .setPlaceholder('⚙️ 管理员操作')
+      .setPlaceholder(bilingual('⚙️ 管理员操作', '⚙️ Admin actions'))
       .addOptions(
-        { label: '🧩 分队管理', value: 'group_open' },
-        { label: '📍 更新分组频道', value: 'group_channel_change' },
-        { label: '🔄 刷新玩家名称', value: 'refresh_names' },
-        { label: '🔒 关闭此报名', value: 'close_signup' },
+        { label: bilingual('🧩 分队管理', '🧩 Manage teams'), value: 'group_open' },
+        { label: bilingual('📍 更新分组频道', '📍 Set team channel'), value: 'group_channel_change' },
+        { label: bilingual('🔄 刷新玩家名称', '🔄 Refresh names'), value: 'refresh_names' },
+        { label: bilingual('🔒 关闭此报名', '🔒 Close signup'), value: 'close_signup' },
       ),
   );
 }
@@ -237,15 +248,15 @@ function buildAttendanceComponents(attendance, guild) {
 
   const declinedCount = getDeclinedCount(attendance);
   const nextTimeLabel = declinedCount > 0
-    ? `下次一定U•ェ•*U (${declinedCount})`
-    : '下次一定U•ェ•*U';
+    ? bilingual(`下次一定U•ェ•*U (${declinedCount})`, `Next time, for sure 😂 (${declinedCount})`)
+    : bilingual('下次一定U•ェ•*U', 'Next time, for sure 😂');
 
   if (!isSelectRoleMode(attendance)) {
     return [
       new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('attendance_join')
-          .setLabel('报名')
+          .setLabel(bilingual('报名', 'Sign up'))
           .setStyle(ButtonStyle.Success),
         new ButtonBuilder()
           .setCustomId('attendance_next_time')
@@ -253,7 +264,7 @@ function buildAttendanceComponents(attendance, guild) {
           .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
           .setCustomId('attendance_cancel')
-          .setLabel('取消报名')
+          .setLabel(bilingual('取消报名', 'Cancel signup'))
           .setStyle(ButtonStyle.Danger),
       ),
       buildAdminMenuRow(),
@@ -270,15 +281,15 @@ function buildAttendanceComponents(attendance, guild) {
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId('attendance_cancel')
-        .setLabel('取消报名')
+        .setLabel(bilingual('取消报名', 'Cancel signup'))
         .setStyle(ButtonStyle.Danger),
       new ButtonBuilder()
         .setCustomId('attendance_specialization_change')
-        .setLabel('⚔️ 继承/觉醒')
+        .setLabel(bilingual('⚔️ 继承/觉醒', '⚔️ Succession/Awakening'))
         .setStyle(ButtonStyle.Primary),
     ),
-    buildClassMenu('attendance_class:first', '选择职业 (Archer - Musa)', BLACK_DESERT_CLASSES.slice(0, midpoint), guild),
-    buildClassMenu('attendance_class:second', '选择职业 (Ninja - Wukong)', BLACK_DESERT_CLASSES.slice(midpoint), guild),
+    buildClassMenu('attendance_class:first', bilingual('选择职业', 'Select class') + ' (Archer - Musa)', BLACK_DESERT_CLASSES.slice(0, midpoint), guild),
+    buildClassMenu('attendance_class:second', bilingual('选择职业', 'Select class') + ' (Ninja - Wukong)', BLACK_DESERT_CLASSES.slice(midpoint), guild),
     buildAdminMenuRow(),
   ];
 }
@@ -293,40 +304,44 @@ function buildAttendanceEmbed(attendance, options = {}) {
 
   return new EmbedBuilder()
     .setColor(options.ended ? 0x99AAB5 : 0x57F287)
-    .setTitle(`${options.ended ? '📌 报名已结束' : '📌 活动报名'}：${attendance.title}`)
+    .setTitle(`${bilingual(options.ended ? '📌 报名已结束' : '📌 活动报名', options.ended ? '📌 Signup ended' : '📌 Event signup')}：${attendance.title}`)
     .setDescription([
-      attendance.description || '请点下方按钮报名参加。',
+      attendance.description || bilingual('请点下方按钮报名参加。', 'Use the buttons below to sign up.'),
       '',
-      `🖱️ 报名方式：${isSelectRoleMode(attendance) ? '选择下方职业即可报名或更新职业' : '点击下方按钮报名'}`,
-      `👥 当前报名：${participantIds.length} 人`,
+      `🖱️ ${bilingual('报名方式', 'How to sign up')}：${isSelectRoleMode(attendance) ? bilingual('选择下方职业即可报名或更新职业', 'Select a class below to sign up or update your class') : bilingual('点击下方按钮报名', 'Click the button below')}`,
+      `👥 ${bilingual('当前报名', 'Signed up')}：${participantIds.length}`,
     ].join('\n'))
     .addFields({
-      name: '报名名单',
+      name: bilingual('报名名单', 'Signup list'),
       value: participantTable,
       inline: false,
     })
-    .setFooter({ text: options.footerText || (options.ended ? '该报名帖已结束' : '可随时点击取消报名退出名单') })
+    .setFooter({ text: options.footerText || (options.ended ? bilingual('该报名帖已结束', 'This signup has ended') : bilingual('可随时点击取消报名退出名单', 'Click cancel anytime to leave the list')) })
     .setTimestamp();
 }
 
 function buildAttendanceResultEmbed(attendance, footerText = '该报名帖已结束', guild = null) {
   const participantIds = getParticipantIds(attendance);
   const resultTable = buildParticipantTable(participantIds, attendance, guild);
+  const footerTranslations = {
+    '该报名帖已结束': 'This signup has ended',
+    '当前报名名单': 'Current signup list',
+  };
 
   return new EmbedBuilder()
     .setColor(0x5865f2)
-    .setTitle(`📋 报名结果：${attendance.title}`)
+    .setTitle(`${bilingual('📋 报名结果', '📋 Signup results')}：${attendance.title}`)
     .setDescription([
-      attendance.description || '活动报名统计',
+      attendance.description || bilingual('活动报名统计', 'Signup summary'),
       '',
-      `👥 最终报名：${participantIds.length} 人`,
+      `👥 ${bilingual('最终报名', 'Total signed up')}：${participantIds.length}`,
     ].join('\n'))
     .addFields({
-      name: '参与名单',
+      name: bilingual('参与名单', 'Participants'),
       value: resultTable,
       inline: false,
     })
-    .setFooter({ text: footerText })
+    .setFooter({ text: footerText.includes(' / ') ? footerText : bilingual(footerText, footerTranslations[footerText] || footerText) })
     .setTimestamp();
 }
 
@@ -345,20 +360,20 @@ function getAssignedUserIds(attendance) {
   return assigned;
 }
 
-function buildSpecializationButtons(messageId, classIndex) {
+function buildSpecializationButtons(messageId, classIndex, interaction) {
   const customIdPrefix = `attendance_specialization:${messageId}:${classIndex}`;
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`${customIdPrefix}:succession`)
-      .setLabel('🔵 继承')
+      .setLabel(privateText(interaction, '🔵 继承', '🔵 Succession'))
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId(`${customIdPrefix}:awakening`)
-      .setLabel('🟠 觉醒')
+      .setLabel(privateText(interaction, '🟠 觉醒', '🟠 Awakening'))
       .setStyle(ButtonStyle.Danger),
     new ButtonBuilder()
       .setCustomId(`${customIdPrefix}:not_applicable`)
-      .setLabel('⚪ 不适用')
+      .setLabel(privateText(interaction, '⚪ 不适用', '⚪ N/A'))
       .setStyle(ButtonStyle.Secondary),
   );
 }
@@ -377,16 +392,16 @@ function buildGroupPanelEmbed(attendance, guild = null, published = false) {
 
   const embed = new EmbedBuilder()
     .setColor(published ? 0x57F287 : 0x5865f2)
-    .setTitle(`${published ? '📌 活动报名' : '🧩 分队面板'}：${attendance.title}`)
+    .setTitle(`${published ? bilingual('📌 活动报名', '📌 Event signup') : bilingual('🧩 分队面板', '🧩 Group panel')}：${attendance.title}`)
     .setDescription(published
       ? [
-        attendance.description || '请点下方按钮报名参加。',
+        attendance.description || bilingual('请点下方按钮报名参加。', 'Use the buttons below to sign up.'),
         '',
-        `🖱️ 报名方式：${isSelectRoleMode(attendance) ? '选择下方职业即可报名或更新职业' : '点击下方按钮报名'}`,
-        `👥 当前报名：${getParticipantIds(attendance).length} 人`,
-        '📋 新报名或更换职业的玩家会进入 Waitlist，等待管理员分配。',
+        `🖱️ ${bilingual('报名方式', 'How to sign up')}：${isSelectRoleMode(attendance) ? bilingual('选择下方职业即可报名或更新职业', 'Select a class below to sign up or update your class') : bilingual('点击下方按钮报名', 'Click the button below')}`,
+        `👥 ${bilingual('当前报名', 'Signed up')}：${getParticipantIds(attendance).length}`,
+        bilingual('📋 新报名或更换职业的玩家会进入 Waitlist，等待管理员分配。', '📋 New signups or class changes enter the Waitlist for admin assignment.'),
       ].join('\n')
-      : (groups.length > 0 ? '按队伍查看当前分组情况' : '当前还没有任何队伍，点击下方「新建队伍」开始。'))
+      : (groups.length > 0 ? bilingual('按队伍查看当前分组情况', 'View the current team assignments') : bilingual('当前还没有任何队伍，点击下方「新建队伍」开始。', 'No teams yet. Click "Create team" below to start.')))
     .setTimestamp();
 
   for (const group of groups) {
@@ -401,12 +416,12 @@ function buildGroupPanelEmbed(attendance, guild = null, published = false) {
   }
 
   embed.addFields({
-    name: `${published ? 'Waitlist' : '未分组'} (${unassignedIds.length})`,
+    name: `${published ? 'Waitlist' : bilingual('未分组', 'Unassigned')} (${unassignedIds.length})`,
     value: buildParticipantTable(unassignedIds, attendance, guild, renderState),
     inline: false,
   });
 
-  if (published) embed.setFooter({ text: '可随时点击取消报名退出名单' });
+  if (published) embed.setFooter({ text: bilingual('可随时点击取消报名退出名单', 'Click cancel anytime to leave the list') });
   return embed;
 }
 
@@ -417,31 +432,31 @@ function buildGroupPanelComponents(attendance) {
   return [new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId('attendance_group_action:create')
-      .setLabel('➕ 新建队伍')
+      .setLabel(bilingual('➕ 新建队伍', '➕ Create team'))
       .setStyle(ButtonStyle.Success)
       .setDisabled(reachedGroupLimit),
     new ButtonBuilder()
       .setCustomId('attendance_group_action:delete')
-      .setLabel('🗑️ 删除队伍')
+      .setLabel(bilingual('🗑️ 删除队伍', '🗑️ Delete team'))
       .setStyle(ButtonStyle.Danger)
       .setDisabled(!hasGroups),
     new ButtonBuilder()
       .setCustomId('attendance_group_action:assign')
-      .setLabel('👥 分配成员')
+      .setLabel(bilingual('👥 分配成员', '👥 Assign members'))
       .setStyle(ButtonStyle.Primary)
       .setDisabled(!hasGroups),
     new ButtonBuilder()
       .setCustomId('attendance_group_action:refresh')
-      .setLabel('🔄 刷新')
+      .setLabel(bilingual('🔄 刷新', '🔄 Refresh'))
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId('attendance_group_action:publish')
-      .setLabel('📢 发布')
+      .setLabel(bilingual('📢 发布', '📢 Publish'))
       .setStyle(ButtonStyle.Primary),
   ), new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId('attendance_group_action:close')
-      .setLabel('✖️ 关闭面板')
+      .setLabel(bilingual('✖️ 关闭面板', '✖️ Close panel'))
       .setStyle(ButtonStyle.Secondary),
   )];
 }
@@ -486,7 +501,7 @@ async function getExistingGroupPanelMessage(client, attendance) {
 function buildExistingGroupPanelRow(guildId, attendance) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setLabel('➡️ 前往分队面板')
+      .setLabel(bilingual('➡️ 前往分队面板', '➡️ Open team panel'))
       .setStyle(ButtonStyle.Link)
       .setURL(`https://discord.com/channels/${guildId}/${attendance.groupPanelChannelId}/${attendance.groupPanelMessageId}`),
   );
@@ -496,7 +511,7 @@ function buildGroupChannelSelector(originalMessageId, mode) {
   return new ActionRowBuilder().addComponents(
     new ChannelSelectMenuBuilder()
       .setCustomId(`attendance_group_channel_select:${originalMessageId}:${mode}`)
-      .setPlaceholder('选择分队面板发送频道')
+      .setPlaceholder(bilingual('选择分队面板发送频道', 'Select team panel channel'))
       .setMinValues(1)
       .setMaxValues(1)
       .addChannelTypes(ChannelType.GuildText),
@@ -583,75 +598,75 @@ async function resetAdminMenuSelection(interaction, attendance) {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('attendance')
-    .setDescription('创建和管理按钮报名帖')
+    .setDescription(bilingual('创建和管理按钮报名帖', 'Create and manage button-based signups'))
     .addSubcommand(subcommand =>
       subcommand
         .setName('create')
-        .setDescription('创建一个新的按钮报名帖')
+        .setDescription(bilingual('创建一个新的按钮报名帖', 'Create a new button-based signup'))
         .addStringOption(option =>
           option
             .setName('title')
-            .setDescription('报名标题')
+            .setDescription(bilingual('报名标题', 'Signup title'))
             .setRequired(true),
         )
         .addBooleanOption(option =>
           option
             .setName('select_role')
-            .setDescription('是否启用职业选择报名模式')
+            .setDescription(bilingual('是否启用职业选择报名模式', 'Enable class selection mode'))
             .setRequired(true),
         )
         .addStringOption(option =>
           option
             .setName('description')
-            .setDescription('报名说明')
+            .setDescription(bilingual('报名说明', 'Signup description'))
             .setRequired(false),
         ),
     )
     .addSubcommand(subcommand =>
       subcommand
         .setName('list')
-        .setDescription('查看当前进行中的报名帖'),
+        .setDescription(bilingual('查看当前进行中的报名帖', 'View active signups')),
     )
     .addSubcommand(subcommand =>
       subcommand
         .setName('participants')
-        .setDescription('查看某个报名帖当前所有报名者')
+        .setDescription(bilingual('查看某个报名帖当前所有报名者', 'View all participants in a signup'))
         .addStringOption(option =>
           option
             .setName('title')
-            .setDescription('报名标题，必须完全一致')
+            .setDescription(bilingual('报名标题，必须完全一致', 'Exact signup title'))
             .setRequired(true),
         )
         .addBooleanOption(option =>
           option
             .setName('public')
-            .setDescription('true 时在频道里公开 @ 名单；默认 false 为私密查看')
+            .setDescription(bilingual('true 时在频道里公开 @ 名单；默认 false 为私密查看', 'Publicly mention the list in the channel; false keeps it private'))
             .setRequired(false),
         ),
     )
     .addSubcommand(subcommand =>
       subcommand
         .setName('end')
-        .setDescription('手动结束一个报名帖')
+        .setDescription(bilingual('手动结束一个报名帖', 'Manually end a signup'))
         .addStringOption(option =>
           option
             .setName('title')
-            .setDescription('报名标题，必须完全一致')
+            .setDescription(bilingual('报名标题，必须完全一致', 'Exact signup title'))
             .setRequired(true),
         ),
     )
     .addSubcommandGroup(group =>
       group
         .setName('group')
-        .setDescription('分队管理')
+        .setDescription(bilingual('分队管理', 'Group management'))
         .addSubcommand(subcommand =>
           subcommand
             .setName('panel')
-            .setDescription('打开某个报名帖的分队面板（仅管理员）')
+            .setDescription(bilingual('打开某个报名帖的分队面板（仅管理员）', 'Open the group panel for a signup (admins only)'))
             .addStringOption(option =>
               option
                 .setName('title')
-                .setDescription('报名标题，必须完全一致')
+                .setDescription(bilingual('报名标题，必须完全一致', 'Exact signup title'))
                 .setRequired(true),
             ),
         ),
@@ -663,7 +678,7 @@ module.exports = {
 
     if (subcommandGroup === 'group' && subcommand === 'panel') {
       if (!isAdminInteraction(interaction)) {
-        await interaction.reply({ content: '❌ 分队面板仅管理员可用。', flags: 64 });
+        await interaction.reply({ content: privateText(interaction, '❌ 分队面板仅管理员可用。', '❌ The group panel is available to admins only.'), flags: 64 });
         return;
       }
 
@@ -672,7 +687,7 @@ module.exports = {
 
       if (!attendance) {
         await interaction.reply({
-          content: `❌ 没有找到名为 **${title}** 的报名帖`,
+          content: privateText(interaction, `❌ 没有找到名为 **${title}** 的报名帖`, `❌ No signup named **${title}** was found.`),
           flags: 64,
         });
         return;
@@ -682,7 +697,7 @@ module.exports = {
       const existingPanel = await getExistingGroupPanelMessage(interaction.client, attendance);
       if (existingPanel) {
         await interaction.editReply({
-          content: '⚠️ 该活动已经有一个分队面板，请前往现有面板继续操作。',
+          content: privateText(interaction, '⚠️ 该活动已经有一个分队面板，请前往现有面板继续操作。', '⚠️ This signup already has a group panel. Please use the existing panel.'),
           components: [buildExistingGroupPanelRow(interaction.guildId, attendance)],
         });
         return;
@@ -698,15 +713,15 @@ module.exports = {
       if (!targetChannel) {
         await interaction.editReply({
           content: savedChannelId
-            ? '原分组频道已不存在或机器人没有发送权限，请重新选择：'
-            : '首次使用分队管理，请选择分队面板发送频道：',
+            ? privateText(interaction, '原分组频道已不存在或机器人没有发送权限，请重新选择：', 'The saved group channel no longer exists or the bot cannot send there. Please choose again:')
+            : privateText(interaction, '首次使用分队管理，请选择分队面板发送频道：', 'Choose a channel for the group panel:'),
           components: [buildGroupChannelSelector(attendance.messageId, 'open')],
         });
         return;
       }
 
       await sendGroupPanelToChannel(interaction.client, title, attendance, targetChannel, interaction.guild);
-      await interaction.editReply({ content: `✅ 分队面板已发送到 <#${targetChannel.id}>。` });
+      await interaction.editReply({ content: privateText(interaction, `✅ 分队面板已发送到 <#${targetChannel.id}>。`, `✅ Group panel sent to <#${targetChannel.id}>.`) });
       return;
     }
 
@@ -717,7 +732,7 @@ module.exports = {
 
       if (attendanceExistsByTitle(title)) {
         await interaction.reply({
-          content: `❌ 已经存在名为 **${title}** 的报名帖`,
+          content: privateText(interaction, `❌ 已经存在名为 **${title}** 的报名帖`, `❌ A signup named **${title}** already exists.`),
           flags: 64,
         });
         return;
@@ -754,7 +769,7 @@ module.exports = {
 
       if (!isAdmin) {
         await interaction.reply({
-          content: '❌ `/attendance list` 仅管理员可用。',
+          content: privateText(interaction, '❌ `/attendance list` 仅管理员可用。', '❌ `/attendance list` is available to admins only.'),
           flags: 64,
         });
         return;
@@ -764,14 +779,14 @@ module.exports = {
 
       if (attendances.length === 0) {
         await interaction.reply({
-          content: '当前没有进行中的报名帖。',
+          content: privateText(interaction, '当前没有进行中的报名帖。', 'There are no active signups.'),
           flags: 64,
         });
         return;
       }
 
       const embed = new EmbedBuilder()
-        .setTitle('📌 报名帖列表')
+        .setTitle(bilingual('📌 报名帖列表', '📌 Signup list'))
         .setColor(0x57F287);
 
       for (const { data } of attendances) {
@@ -780,9 +795,11 @@ module.exports = {
         embed.addFields({
           name: `🟢 ${data.title}`,
           value: [
-            `👥 当前报名：${participantCount} 人`,
-            isSelectRoleMode(data) ? '🗂️ 报名时需选择黑色沙漠职业' : '🟢 点击报名按钮即可报名',
-            data.channelId ? `📍 频道：<#${data.channelId}>` : null,
+            `👥 ${bilingual('当前报名', 'Signed up')}：${participantCount}`,
+            isSelectRoleMode(data)
+              ? bilingual('🗂️ 报名时需选择黑色沙漠职业', '🗂️ Select a Black Desert class when signing up')
+              : bilingual('🟢 点击报名按钮即可报名', '🟢 Click the signup button to join'),
+            data.channelId ? `📍 ${bilingual('频道', 'Channel')}：<#${data.channelId}>` : null,
           ].filter(Boolean).join('\n'),
           inline: false,
         });
@@ -800,7 +817,7 @@ module.exports = {
 
       if (!attendance) {
         await interaction.reply({
-          content: `❌ 没有找到名为 **${title}** 的报名帖`,
+          content: privateText(interaction, `❌ 没有找到名为 **${title}** 的报名帖`, `❌ No signup named **${title}** was found.`),
           flags: 64,
         });
         return;
@@ -812,7 +829,7 @@ module.exports = {
 
         if (!isAdmin && !isCreator) {
           await interaction.reply({
-            content: '❌ 只有管理员或这条报名帖的创建者才能公开 @ 报名名单。',
+            content: privateText(interaction, '❌ 只有管理员或这条报名帖的创建者才能公开 @ 报名名单。', '❌ Only an admin or the signup creator can publicly mention the participant list.'),
             flags: 64,
           });
           return;
@@ -820,7 +837,7 @@ module.exports = {
 
         if (attendance.channelId && interaction.channelId !== attendance.channelId) {
           await interaction.reply({
-            content: `❌ 只能在原报名帖所在频道 <#${attendance.channelId}> 公开 @ 报名名单。`,
+            content: privateText(interaction, `❌ 只能在原报名帖所在频道 <#${attendance.channelId}> 公开 @ 报名名单。`, `❌ The participant list can only be publicly mentioned in the original signup channel <#${attendance.channelId}>.`),
             flags: 64,
           });
           return;
@@ -832,8 +849,8 @@ module.exports = {
 
         await interaction.reply({
           content: participantIds.length > 0
-            ? `📣 **${attendance.title}** 当前报名名单\n${mentionLine}`
-            : `📣 **${attendance.title}** 当前无人报名。`,
+            ? `📣 **${attendance.title}** ${bilingual('当前报名名单', 'Current signup list')}\n${mentionLine}`
+            : `📣 **${attendance.title}** ${bilingual('当前无人报名。', 'No one has signed up yet.')}`,
           allowedMentions: {
             users: participantIds,
           },
@@ -854,7 +871,7 @@ module.exports = {
 
       if (!attendance) {
         await interaction.reply({
-          content: `❌ 没有找到名为 **${title}** 的报名帖`,
+          content: privateText(interaction, `❌ 没有找到名为 **${title}** 的报名帖`, `❌ No signup named **${title}** was found.`),
           flags: 64,
         });
         return;
@@ -865,7 +882,7 @@ module.exports = {
 
       if (!isAdmin && !isCreator) {
         await interaction.reply({
-          content: '❌ 只有管理员或这条报名帖的创建者才能结束报名帖。',
+          content: privateText(interaction, '❌ 只有管理员或这条报名帖的创建者才能结束报名帖。', '❌ Only an admin or the signup creator can end this signup.'),
           flags: 64,
         });
         return;
@@ -873,7 +890,7 @@ module.exports = {
 
       if (attendance.status === 'ended') {
         await interaction.reply({
-          content: `⚠️ 报名帖 **${title}** 已经结束`,
+          content: privateText(interaction, `⚠️ 报名帖 **${title}** 已经结束`, `⚠️ Signup **${title}** has already ended.`),
           flags: 64,
         });
         return;
@@ -889,11 +906,12 @@ module.exports = {
   buildAttendanceResultEmbed,
   buildAttendanceComponents,
   buildGroupPanelComponents,
+  buildSpecializationButtons,
 
   async handleAttendanceButton(interaction) {
     const match = findAttendanceByMessage(interaction.message.id);
     if (!match || match.attendance.status !== 'active') {
-      await interaction.reply({ content: '❌ 该报名帖已结束或不存在。', flags: 64 });
+      await interaction.reply({ content: privateText(interaction, '❌ 该报名帖已结束或不存在。', '❌ This signup has ended or no longer exists.'), flags: 64 });
       return;
     }
 
@@ -946,7 +964,7 @@ module.exports = {
   async handleAttendanceSpecializationChange(interaction) {
     const match = findAttendanceByMessage(interaction.message.id);
     if (!match || match.attendance.status !== 'active') {
-      await interaction.reply({ content: '❌ 该报名帖已结束或不存在。', flags: 64 });
+      await interaction.reply({ content: privateText(interaction, '❌ 该报名帖已结束或不存在。', '❌ This signup has ended or no longer exists.'), flags: 64 });
       return;
     }
 
@@ -954,18 +972,18 @@ module.exports = {
     const selection = getParticipantSelection(participant);
     const classIndex = BLACK_DESERT_CLASSES.findIndex(item => item.name === selection);
     if (!participant || classIndex < 0) {
-      await interaction.reply({ content: '⚠️ 请先从职业下拉菜单选择职业并完成报名。', flags: 64 });
+      await interaction.reply({ content: privateText(interaction, '⚠️ 请先从职业下拉菜单选择职业并完成报名。', '⚠️ Select a class from the menu and sign up first.'), flags: 64 });
       return;
     }
 
     if (selection === 'Shai') {
-      await interaction.reply({ content: '🟡 Shai 不需要选择继承或觉醒。', flags: 64 });
+      await interaction.reply({ content: privateText(interaction, '🟡 Shai 不需要选择继承或觉醒。', '🟡 Shai does not use Succession or Awakening.'), flags: 64 });
       return;
     }
 
     await interaction.reply({
-      content: `当前职业：**${selection}**。请选择继承、觉醒或不适用：`,
-      components: [buildSpecializationButtons(interaction.message.id, classIndex)],
+      content: privateText(interaction, `当前职业：**${selection}**。请选择继承、觉醒或不适用：`, `Current class: **${selection}**. Choose Succession, Awakening, or N/A:`),
+      components: [buildSpecializationButtons(interaction.message.id, classIndex, interaction)],
       flags: 64,
     });
   },
@@ -973,14 +991,14 @@ module.exports = {
   async handleAttendanceClassSelection(interaction) {
     const match = findAttendanceByMessage(interaction.message.id);
     if (!match || match.attendance.status !== 'active') {
-      await interaction.update({ content: '❌ 该报名帖已结束或不存在。', components: [] });
+      await interaction.update({ content: privateText(interaction, '❌ 该报名帖已结束或不存在。', '❌ This signup has ended or no longer exists.'), components: [] });
       return;
     }
 
     const nextSelection = interaction.values[0];
     const classIndex = BLACK_DESERT_CLASSES.findIndex(item => item.name === nextSelection);
     if (classIndex < 0) {
-      await interaction.reply({ content: '❌ 无法识别所选职业，请重新选择。', flags: 64 });
+      await interaction.reply({ content: privateText(interaction, '❌ 无法识别所选职业，请重新选择。', '❌ The selected class was not recognized. Please try again.'), flags: 64 });
       return;
     }
 
@@ -1009,8 +1027,8 @@ module.exports = {
     }
 
     await interaction.reply({
-      content: `已选择 **${nextSelection}**，请选择继承、觉醒或不适用：`,
-      components: [buildSpecializationButtons(interaction.message.id, classIndex)],
+      content: privateText(interaction, `已选择 **${nextSelection}**，请选择继承、觉醒或不适用：`, `Selected **${nextSelection}**. Choose Succession, Awakening, or N/A:`),
+      components: [buildSpecializationButtons(interaction.message.id, classIndex, interaction)],
       flags: 64,
     });
   },
@@ -1024,7 +1042,7 @@ module.exports = {
       : ['succession', 'awakening', 'not_applicable'].includes(specialization);
 
     if (!match || match.attendance.status !== 'active' || !classInfo || !validSpecialization) {
-      await interaction.update({ content: '❌ 该选择已失效，请回到报名面板重新选择职业。', components: [] });
+      await interaction.update({ content: privateText(interaction, '❌ 该选择已失效，请回到报名面板重新选择职业。', '❌ This selection is no longer valid. Return to the signup panel and choose a class again.'), components: [] });
       return;
     }
 
@@ -1065,12 +1083,12 @@ module.exports = {
   async handleAttendanceAdminMenu(interaction) {
     const match = findAttendanceByMessage(interaction.message.id);
     if (!match || match.attendance.status !== 'active') {
-      await interaction.reply({ content: '❌ 该报名帖已结束或不存在。', flags: 64 });
+      await interaction.reply({ content: privateText(interaction, '❌ 该报名帖已结束或不存在。', '❌ This signup has ended or no longer exists.'), flags: 64 });
       return;
     }
 
     if (!isAdminInteraction(interaction)) {
-      await interaction.reply({ content: '❌ 该操作仅管理员可用。', flags: 64 });
+      await interaction.reply({ content: privateText(interaction, '❌ 该操作仅管理员可用。', '❌ This action is available to admins only.'), flags: 64 });
       return;
     }
 
@@ -1102,7 +1120,7 @@ module.exports = {
 
     if (action === 'group_channel_change') {
       await interaction.reply({
-        content: '请选择以后用于发送临时分队面板的频道：',
+        content: privateText(interaction, '请选择以后用于发送临时分队面板的频道：', 'Choose the channel for future temporary group panels:'),
         components: [buildGroupChannelSelector(interaction.message.id, 'change')],
         flags: 64,
       });
@@ -1115,7 +1133,7 @@ module.exports = {
       const existingPanel = await getExistingGroupPanelMessage(interaction.client, attendance);
       if (existingPanel) {
         await interaction.editReply({
-          content: '⚠️ 该活动已经有一个分队面板，请前往现有面板继续操作。',
+          content: privateText(interaction, '⚠️ 该活动已经有一个分队面板，请前往现有面板继续操作。', '⚠️ This signup already has a group panel. Please use the existing panel.'),
           components: [buildExistingGroupPanelRow(interaction.guildId, attendance)],
         });
         await resetAdminMenuSelection(interaction, attendance);
@@ -1132,8 +1150,8 @@ module.exports = {
       if (!targetChannel) {
         await interaction.editReply({
           content: savedChannelId
-            ? '原分组频道已不存在或机器人没有发送权限，请重新选择：'
-            : '首次使用分队管理，请选择分队面板发送频道：',
+            ? privateText(interaction, '原分组频道已不存在或机器人没有发送权限，请重新选择：', 'The saved group channel no longer exists or the bot cannot send there. Please choose again:')
+            : privateText(interaction, '首次使用分队管理，请选择分队面板发送频道：', 'Choose a channel for the group panel:'),
           components: [buildGroupChannelSelector(interaction.message.id, 'open')],
         });
         await resetAdminMenuSelection(interaction, attendance);
@@ -1142,21 +1160,21 @@ module.exports = {
 
       await sendGroupPanelToChannel(interaction.client, title, attendance, targetChannel, interaction.guild);
       await resetAdminMenuSelection(interaction, attendance);
-      await interaction.editReply({ content: `✅ 分队面板已发送到 <#${targetChannel.id}>。` });
+      await interaction.editReply({ content: privateText(interaction, `✅ 分队面板已发送到 <#${targetChannel.id}>。`, `✅ Group panel sent to <#${targetChannel.id}>.`) });
       return;
     }
 
     if (action === 'close_signup') {
       await interaction.reply({
-        content: `⚠️ 确定要关闭报名帖「${attendance.title}」吗？关闭后将无法继续报名。`,
+        content: privateText(interaction, `⚠️ 确定要关闭报名帖「${attendance.title}」吗？关闭后将无法继续报名。`, `⚠️ Close signup "${attendance.title}"? No one will be able to sign up afterward.`),
         components: [new ActionRowBuilder().addComponents(
           new ButtonBuilder()
             .setCustomId(`attendance_close_confirm:${interaction.message.id}`)
-            .setLabel('✅ 确认关闭')
+            .setLabel(privateText(interaction, '✅ 确认关闭', '✅ Confirm close'))
             .setStyle(ButtonStyle.Danger),
           new ButtonBuilder()
             .setCustomId('attendance_close_cancel')
-            .setLabel('❌ 取消')
+            .setLabel(privateText(interaction, '❌ 取消', '❌ Cancel'))
             .setStyle(ButtonStyle.Secondary),
         )],
         flags: 64,
@@ -1168,14 +1186,14 @@ module.exports = {
 
   async handleGroupChannelSelect(interaction) {
     if (!isAdminInteraction(interaction)) {
-      await interaction.update({ content: '❌ 仅管理员可以设置分组频道。', components: [] });
+      await interaction.update({ content: privateText(interaction, '❌ 仅管理员可以设置分组频道。', '❌ Only admins can set the group channel.'), components: [] });
       return;
     }
 
     const [, originalMessageId, mode] = interaction.customId.split(':');
     const match = findAttendanceByMessage(originalMessageId);
     if (!match || match.attendance.status !== 'active') {
-      await interaction.update({ content: '❌ 该报名帖已结束或不存在。', components: [] });
+      await interaction.update({ content: privateText(interaction, '❌ 该报名帖已结束或不存在。', '❌ This signup has ended or no longer exists.'), components: [] });
       return;
     }
 
@@ -1183,7 +1201,7 @@ module.exports = {
     const targetChannel = await getWritableGroupChannel(interaction.guild, interaction.values[0]);
     if (!targetChannel) {
       await interaction.editReply({
-        content: '❌ 机器人无法在该频道发送分队面板，请选择允许机器人查看、发言和嵌入链接的文字频道。',
+        content: privateText(interaction, '❌ 机器人无法在该频道发送分队面板，请选择允许机器人查看、发言和嵌入链接的文字频道。', '❌ The bot cannot send a group panel there. Choose a text channel where it can view, send messages, and embed links.'),
         components: [buildGroupChannelSelector(originalMessageId, mode)],
       });
       return;
@@ -1191,13 +1209,13 @@ module.exports = {
 
     setGroupChannelId(interaction.guildId, targetChannel.id);
     if (mode === 'change') {
-      await interaction.editReply({ content: `✅ 默认分组频道已更新为 <#${targetChannel.id}>。`, components: [] });
+      await interaction.editReply({ content: privateText(interaction, `✅ 默认分组频道已更新为 <#${targetChannel.id}>。`, `✅ Default group channel updated to <#${targetChannel.id}>.`), components: [] });
       return;
     }
 
     const latestMatch = findAttendanceByMessage(originalMessageId);
     if (!latestMatch || latestMatch.attendance.status !== 'active') {
-      await interaction.editReply({ content: '❌ 该报名帖已结束或不存在。', components: [] });
+      await interaction.editReply({ content: privateText(interaction, '❌ 该报名帖已结束或不存在。', '❌ This signup has ended or no longer exists.'), components: [] });
       return;
     }
 
@@ -1205,7 +1223,7 @@ module.exports = {
     const existingPanel = await getExistingGroupPanelMessage(interaction.client, attendance);
     if (existingPanel) {
       await interaction.editReply({
-        content: '⚠️ 该活动已经有一个分队面板，请前往现有面板继续操作。',
+        content: privateText(interaction, '⚠️ 该活动已经有一个分队面板，请前往现有面板继续操作。', '⚠️ This signup already has a group panel. Please use the existing panel.'),
         components: [buildExistingGroupPanelRow(interaction.guildId, attendance)],
       });
       return;
@@ -1224,12 +1242,12 @@ module.exports = {
     } catch (error) {
       console.error('[attendance] 重置管理员菜单失败:', error.message);
     }
-    await interaction.editReply({ content: `✅ 分队面板已发送到 <#${targetChannel.id}>。`, components: [] });
+    await interaction.editReply({ content: privateText(interaction, `✅ 分队面板已发送到 <#${targetChannel.id}>。`, `✅ Group panel sent to <#${targetChannel.id}>.`), components: [] });
   },
 
   async handleAttendanceCloseConfirm(interaction) {
     if (!isAdminInteraction(interaction)) {
-      await interaction.update({ content: '❌ 该操作仅管理员可用。', components: [] });
+      await interaction.update({ content: privateText(interaction, '❌ 该操作仅管理员可用。', '❌ This action is available to admins only.'), components: [] });
       return;
     }
 
@@ -1237,29 +1255,29 @@ module.exports = {
     const match = findAttendanceByMessage(originalMessageId);
 
     if (!match) {
-      await interaction.update({ content: '❌ 该报名帖已结束或不存在。', components: [] });
+      await interaction.update({ content: privateText(interaction, '❌ 该报名帖已结束或不存在。', '❌ This signup has ended or no longer exists.'), components: [] });
       return;
     }
 
     const { title, attendance } = match;
     await closeAttendance(interaction.client, title, attendance);
 
-    await interaction.update({ content: `✅ 已关闭「${attendance.title}」的报名帖。`, components: [] });
+    await interaction.update({ content: privateText(interaction, `✅ 已关闭「${attendance.title}」的报名帖。`, `✅ Signup "${attendance.title}" has been closed.`), components: [] });
   },
 
   async handleAttendanceCloseCancel(interaction) {
-    await interaction.update({ content: '已取消操作。', components: [] });
+    await interaction.update({ content: privateText(interaction, '已取消操作。', 'Action cancelled.'), components: [] });
   },
 
   async handleGroupPanelAction(interaction) {
     if (!isAdminInteraction(interaction)) {
-      await interaction.reply({ content: '❌ 仅管理员可以操作分队面板。', flags: 64 });
+      await interaction.reply({ content: privateText(interaction, '❌ 仅管理员可以操作分队面板。', '❌ Only admins can operate the group panel.'), flags: 64 });
       return;
     }
 
     const match = findAttendanceByGroupPanelMessage(interaction.message.id);
     if (!match) {
-      await interaction.reply({ content: '❌ 找不到该分队面板对应的报名帖。', flags: 64 });
+      await interaction.reply({ content: privateText(interaction, '❌ 找不到该分队面板对应的报名帖。', '❌ Could not find the signup for this group panel.'), flags: 64 });
       return;
     }
 
@@ -1276,18 +1294,18 @@ module.exports = {
 
     if (action === 'create') {
       if ((attendance.groups || []).length >= MAX_ATTENDANCE_GROUPS) {
-        await interaction.reply({ content: `⚠️ 每个活动最多只能创建 ${MAX_ATTENDANCE_GROUPS} 个队伍。`, flags: 64 });
+        await interaction.reply({ content: privateText(interaction, `⚠️ 每个活动最多只能创建 ${MAX_ATTENDANCE_GROUPS} 个队伍。`, `⚠️ Each signup can have at most ${MAX_ATTENDANCE_GROUPS} groups.`), flags: 64 });
         return;
       }
 
       const modal = new ModalBuilder()
         .setCustomId(`attendance_group_create_modal:${interaction.message.id}`)
-        .setTitle('新建队伍')
+        .setTitle(privateText(interaction, '新建队伍', 'Create group'))
         .addComponents(
           new ActionRowBuilder().addComponents(
             new TextInputBuilder()
               .setCustomId('team_name')
-              .setLabel('队伍名称')
+              .setLabel(privateText(interaction, '队伍名称', 'Group name'))
               .setStyle(TextInputStyle.Short)
               .setMaxLength(80)
               .setRequired(true),
@@ -1295,7 +1313,7 @@ module.exports = {
           new ActionRowBuilder().addComponents(
             new TextInputBuilder()
               .setCustomId('team_capacity')
-              .setLabel('人数上限（留空表示不限）')
+              .setLabel(privateText(interaction, '人数上限（留空表示不限）', 'Capacity (leave blank for unlimited)'))
               .setStyle(TextInputStyle.Short)
               .setRequired(false),
           ),
@@ -1315,19 +1333,19 @@ module.exports = {
 
     if (action === 'delete') {
       if (groups.length === 0) {
-        await interaction.reply({ content: '⚠️ 当前还没有任何队伍。', flags: 64 });
+        await interaction.reply({ content: privateText(interaction, '⚠️ 当前还没有任何队伍。', '⚠️ There are no groups yet.'), flags: 64 });
         return;
       }
 
       const selectMenu = new StringSelectMenuBuilder()
         .setCustomId(`attendance_group_delete_select:${interaction.message.id}`)
-        .setPlaceholder('选择要删除的队伍')
+        .setPlaceholder(privateText(interaction, '选择要删除的队伍', 'Select groups to delete'))
         .setMinValues(1)
         .setMaxValues(Math.min(groups.length, GROUP_SELECT_MAX_VALUES))
         .addOptions(groups.map(group => ({ label: group.label, value: group.id })));
 
       await interaction.reply({
-        content: '选择要删除的队伍（已分配的成员会移回未分组）：',
+        content: privateText(interaction, '选择要删除的队伍（已分配的成员会移回未分组）：', 'Select groups to delete. Assigned members will return to Unassigned:'),
         components: [new ActionRowBuilder().addComponents(selectMenu)],
         flags: 64,
       });
@@ -1336,19 +1354,19 @@ module.exports = {
 
     if (action === 'assign') {
       if (groups.length === 0) {
-        await interaction.reply({ content: '⚠️ 当前还没有任何队伍，请先新建队伍。', flags: 64 });
+        await interaction.reply({ content: privateText(interaction, '⚠️ 当前还没有任何队伍，请先新建队伍。', '⚠️ There are no groups yet. Create one first.'), flags: 64 });
         return;
       }
 
       const selectMenu = new StringSelectMenuBuilder()
         .setCustomId(`attendance_group_target_select:${interaction.message.id}`)
-        .setPlaceholder('选择要分配成员的队伍')
+        .setPlaceholder(privateText(interaction, '选择要分配成员的队伍', 'Select the group for members'))
         .setMinValues(1)
         .setMaxValues(1)
         .addOptions(groups.map(group => ({ label: group.label, value: group.id })));
 
       await interaction.reply({
-        content: '第一步：选择要分配成员的队伍',
+        content: privateText(interaction, '第一步：选择要分配成员的队伍', 'Step 1: Select the group for the members'),
         components: [new ActionRowBuilder().addComponents(selectMenu)],
         flags: 64,
       });
@@ -1367,7 +1385,7 @@ module.exports = {
         });
       } catch (error) {
         console.error('[attendance] 发布分组到报名帖失败:', error.message);
-        await interaction.followUp({ content: '❌ 无法更新原活动报名面板，请检查消息是否仍存在以及机器人权限。', flags: 64 });
+        await interaction.followUp({ content: privateText(interaction, '❌ 无法更新原活动报名面板，请检查消息是否仍存在以及机器人权限。', '❌ Could not update the original signup panel. Check that the message still exists and that the bot has permission.'), flags: 64 });
         return;
       }
       await deleteGroupPanel(interaction, title, attendance);
@@ -1379,13 +1397,13 @@ module.exports = {
     const panelMessageId = interaction.customId.split(':')[1];
 
     if (!isAdminInteraction(interaction)) {
-      await interaction.reply({ content: '❌ 仅管理员可以操作分队面板。', flags: 64 });
+      await interaction.reply({ content: privateText(interaction, '❌ 仅管理员可以操作分队面板。', '❌ Only admins can operate the group panel.'), flags: 64 });
       return;
     }
 
     const match = findAttendanceByGroupPanelMessage(panelMessageId);
     if (!match) {
-      await interaction.reply({ content: '❌ 找不到该分队面板对应的报名帖。', flags: 64 });
+      await interaction.reply({ content: privateText(interaction, '❌ 找不到该分队面板对应的报名帖。', '❌ Could not find the signup for this group panel.'), flags: 64 });
       return;
     }
 
@@ -1395,17 +1413,17 @@ module.exports = {
     const capacity = capacityRaw ? Number.parseInt(capacityRaw, 10) : null;
 
     if (!name) {
-      await interaction.reply({ content: '❌ 队伍名称不能为空。', flags: 64 });
+      await interaction.reply({ content: privateText(interaction, '❌ 队伍名称不能为空。', '❌ Group name cannot be empty.'), flags: 64 });
       return;
     }
 
     if (capacityRaw && (!Number.isFinite(capacity) || capacity <= 0)) {
-      await interaction.reply({ content: '❌ 人数上限必须是大于 0 的数字，或留空表示不限。', flags: 64 });
+      await interaction.reply({ content: privateText(interaction, '❌ 人数上限必须是大于 0 的数字，或留空表示不限。', '❌ Capacity must be a number greater than 0, or blank for unlimited.'), flags: 64 });
       return;
     }
 
     if ((attendance.groups || []).length >= MAX_ATTENDANCE_GROUPS) {
-      await interaction.reply({ content: `⚠️ 每个活动最多只能创建 ${MAX_ATTENDANCE_GROUPS} 个队伍。`, flags: 64 });
+      await interaction.reply({ content: privateText(interaction, `⚠️ 每个活动最多只能创建 ${MAX_ATTENDANCE_GROUPS} 个队伍。`, `⚠️ Each signup can have at most ${MAX_ATTENDANCE_GROUPS} groups.`), flags: 64 });
       return;
     }
 
@@ -1426,13 +1444,13 @@ module.exports = {
     const panelMessageId = interaction.customId.split(':')[1];
 
     if (!isAdminInteraction(interaction)) {
-      await interaction.reply({ content: '❌ 仅管理员可以操作分队面板。', flags: 64 });
+      await interaction.reply({ content: privateText(interaction, '❌ 仅管理员可以操作分队面板。', '❌ Only admins can operate the group panel.'), flags: 64 });
       return;
     }
 
     const match = findAttendanceByGroupPanelMessage(panelMessageId);
     if (!match) {
-      await interaction.update({ content: '❌ 找不到该分队面板对应的报名帖。', components: [] });
+      await interaction.update({ content: privateText(interaction, '❌ 找不到该分队面板对应的报名帖。', '❌ Could not find the signup for this group panel.'), components: [] });
       return;
     }
 
@@ -1450,13 +1468,13 @@ module.exports = {
     const panelMessageId = interaction.customId.split(':')[1];
 
     if (!isAdminInteraction(interaction)) {
-      await interaction.reply({ content: '❌ 仅管理员可以操作分队面板。', flags: 64 });
+      await interaction.reply({ content: privateText(interaction, '❌ 仅管理员可以操作分队面板。', '❌ Only admins can operate the group panel.'), flags: 64 });
       return;
     }
 
     const match = findAttendanceByGroupPanelMessage(panelMessageId);
     if (!match) {
-      await interaction.update({ content: '❌ 找不到该分队面板对应的报名帖。', components: [] });
+      await interaction.update({ content: privateText(interaction, '❌ 找不到该分队面板对应的报名帖。', '❌ Could not find the signup for this group panel.'), components: [] });
       return;
     }
 
@@ -1465,13 +1483,13 @@ module.exports = {
     const group = (attendance.groups || []).find(item => item.id === groupId);
 
     if (!group) {
-      await interaction.update({ content: '❌ 该队伍已不存在，请重新操作。', components: [] });
+      await interaction.update({ content: privateText(interaction, '❌ 该队伍已不存在，请重新操作。', '❌ That group no longer exists. Please try again.'), components: [] });
       return;
     }
 
     const participantIds = getParticipantIds(attendance);
     if (participantIds.length === 0) {
-      await interaction.update({ content: '⚠️ 当前没有已报名成员可供分配。', components: [] });
+      await interaction.update({ content: privateText(interaction, '⚠️ 当前没有已报名成员可供分配。', '⚠️ There are no signed-up members to assign.'), components: [] });
       return;
     }
 
@@ -1483,7 +1501,7 @@ module.exports = {
     const memberRows = chunks.map((chunk, pageIndex) => new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId(`attendance_group_user_select:${panelMessageId}:${groupId}:${pageIndex}`)
-        .setPlaceholder(`${group.label}：已报名成员 ${pageIndex + 1}/${chunks.length}`)
+        .setPlaceholder(`${group.label}: ${privateText(interaction, `已报名成员 ${pageIndex + 1}/${chunks.length}`, `Signed-up members ${pageIndex + 1}/${chunks.length}`)}`)
         .setMinValues(1)
         .setMaxValues(chunk.length)
         .addOptions(chunk.map(userId => {
@@ -1494,7 +1512,7 @@ module.exports = {
           ? interaction.guild?.emojis?.cache?.find(entry => entry.name === classInfo.emojiName)
           : null;
         return {
-          label: String(participant?.displayName || `用户${userId}`).slice(0, 100),
+          label: String(participant?.displayName || privateText(interaction, `用户${userId}`, `User ${userId}`)).slice(0, 100),
           value: userId,
           ...(selection ? { description: selection.slice(0, 100) } : {}),
           ...(emoji ? { emoji: { id: emoji.id, name: emoji.name } } : {}),
@@ -1503,7 +1521,7 @@ module.exports = {
     ));
 
     await interaction.update({
-      content: `第二步：选择要加入「${group.label}」的已报名成员${participantIds.length > GROUP_SELECT_MAX_VALUES * 5 ? '（Discord 单次最多显示前 125 人）' : ''}`,
+      content: privateText(interaction, `第二步：选择要加入「${group.label}」的已报名成员${participantIds.length > GROUP_SELECT_MAX_VALUES * 5 ? '（Discord 单次最多显示前 125 人）' : ''}`, `Step 2: Select signed-up members to add to "${group.label}"${participantIds.length > GROUP_SELECT_MAX_VALUES * 5 ? ' (Discord shows up to 125 at a time)' : ''}`),
       components: memberRows,
     });
   },
@@ -1512,13 +1530,13 @@ module.exports = {
     const [, panelMessageId, groupId] = interaction.customId.split(':');
 
     if (!isAdminInteraction(interaction)) {
-      await interaction.reply({ content: '❌ 仅管理员可以操作分队面板。', flags: 64 });
+      await interaction.reply({ content: privateText(interaction, '❌ 仅管理员可以操作分队面板。', '❌ Only admins can operate the group panel.'), flags: 64 });
       return;
     }
 
     const match = findAttendanceByGroupPanelMessage(panelMessageId);
     if (!match) {
-      await interaction.update({ content: '❌ 找不到该分队面板对应的报名帖。', components: [] });
+      await interaction.update({ content: privateText(interaction, '❌ 找不到该分队面板对应的报名帖。', '❌ Could not find the signup for this group panel.'), components: [] });
       return;
     }
 
@@ -1526,7 +1544,7 @@ module.exports = {
     const group = (attendance.groups || []).find(item => item.id === groupId);
 
     if (!group) {
-      await interaction.update({ content: '❌ 该队伍已不存在，请重新操作。', components: [] });
+      await interaction.update({ content: privateText(interaction, '❌ 该队伍已不存在，请重新操作。', '❌ That group no longer exists. Please try again.'), components: [] });
       return;
     }
 
@@ -1534,7 +1552,7 @@ module.exports = {
     const selectedUserIds = interaction.values.filter(userId => registeredIds.has(userId));
 
     if (selectedUserIds.length === 0) {
-      await interaction.update({ content: '❌ 所选成员已不在报名名单中，请重新分配。', components: [] });
+      await interaction.update({ content: privateText(interaction, '❌ 所选成员已不在报名名单中，请重新分配。', '❌ One or more selected members are no longer signed up. Please assign again.'), components: [] });
       return;
     }
 
