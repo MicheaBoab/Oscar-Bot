@@ -27,6 +27,8 @@ const {
   parseIsoDate,
   weekdayFromIsoDate,
   formatWeekdayLabel,
+  formatWeekdayShort,
+  getReminderWeekdays,
   getZonedDateParts,
   findUnixForLocalTime,
   computeNextReminderOccurrenceUnix,
@@ -158,46 +160,171 @@ function parseDotDateToIso(value) {
   return parsed.dateKey;
 }
 
+const WEEKDAY_INPUT_MAP = {
+  '日': 0,
+  '天': 0,
+  '一': 1,
+  '二': 2,
+  '三': 3,
+  '四': 4,
+  '五': 5,
+  '六': 6,
+};
+
+const WEEKDAY_DISPLAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+
+function uniqSortedWeekdays(values) {
+  return [...new Set(values
+    .map(value => Number(value))
+    .filter(value => Number.isInteger(value) && value >= 0 && value <= 6))]
+    .sort((a, b) => a - b);
+}
+
+function parseWeekdayListInput(value) {
+  const source = String(value || '')
+    .replace(/星期|礼拜|週|周/g, '')
+    .replace(/[，,、]/g, '')
+    .trim();
+  if (!source) return [];
+
+  const rangeMatch = source.match(/^([天日一二三四五六])(?:到|至|-)([天日一二三四五六])$/);
+  if (rangeMatch) {
+    const start = WEEKDAY_INPUT_MAP[rangeMatch[1]];
+    const end = WEEKDAY_INPUT_MAP[rangeMatch[2]];
+    if (!Number.isInteger(start) || !Number.isInteger(end)) return [];
+
+    const weekdays = [];
+    for (let day = start; ; day = (day + 1) % 7) {
+      weekdays.push(day);
+      if (day === end) break;
+    }
+    return uniqSortedWeekdays(weekdays);
+  }
+
+  if (!/^[天日一二三四五六]+$/.test(source)) return [];
+  return uniqSortedWeekdays([...source].map(char => WEEKDAY_INPUT_MAP[char]));
+}
+
+function formatWeekdayList(weekdays) {
+  const set = new Set(weekdays);
+  return WEEKDAY_DISPLAY_ORDER
+    .filter(day => set.has(day))
+    .map(day => formatWeekdayShort(day))
+    .join('、');
+}
+
+function buildFrequencyLabel(reminder) {
+  const weekdays = getReminderWeekdays(reminder);
+  if (reminder.frequencyWeeks === 2) {
+    return `每两周${formatWeekdayShort(weekdays[0] ?? reminder.weekday)}`;
+  }
+
+  if (weekdays.length === 7) return '每天';
+  if (weekdays.length === 5 && [1, 2, 3, 4, 5].every(day => weekdays.includes(day))) return '工作日';
+  if (weekdays.length === 2 && weekdays.includes(0) && weekdays.includes(6)) return '周末';
+  if (weekdays.length === 6) {
+    const excluded = [0, 1, 2, 3, 4, 5, 6].find(day => !weekdays.includes(day));
+    if (Number.isInteger(excluded)) return `每天除${formatWeekdayShort(excluded)}`;
+  }
+
+  return `每周${formatWeekdayList(weekdays)}`;
+}
+
 function parseReminderRuleInput(value) {
   const source = String(value || '').trim().replace(/\s+/g, '');
   if (!source) {
-    return { ok: false, error: '❌ 频率不能为空，请输入例如：每周日、每两周周三。' };
+    return { ok: false, error: '❌ 频率不能为空，请输入例如：每天除周六、每周一三五、每两周周三。' };
   }
 
-  const weekdayMap = {
-    '日': 0,
-    '天': 0,
-    '一': 1,
-    '二': 2,
-    '三': 3,
-    '四': 4,
-    '五': 5,
-    '六': 6,
-  };
+  const allWeekdays = [0, 1, 2, 3, 4, 5, 6];
 
-  let match = source.match(/^每周(?:周|星期)?([天日一二三四五六])$/);
-  if (match) {
+  if (/^(每天|每日)$/.test(source)) {
     return {
       ok: true,
       frequencyWeeks: 1,
-      weekday: weekdayMap[match[1]],
+      weekday: 0,
+      weekdays: allWeekdays,
+      normalizedRuleText: '每天',
+    };
+  }
+
+  if (/^(工作日|平日)$/.test(source)) {
+    return {
+      ok: true,
+      frequencyWeeks: 1,
+      weekday: 1,
+      weekdays: [1, 2, 3, 4, 5],
+      normalizedRuleText: '工作日',
+    };
+  }
+
+  if (/^(周末|週末)$/.test(source)) {
+    return {
+      ok: true,
+      frequencyWeeks: 1,
+      weekday: 0,
+      weekdays: [0, 6],
+      normalizedRuleText: '周末',
+    };
+  }
+
+  let exceptMatch = source.match(/^(?:每天|每日)(?:除了|除)(.+)$/)
+    || source.match(/^(?:除了|除)(.+)(?:每天|每日)$/);
+  if (exceptMatch) {
+    const excluded = parseWeekdayListInput(exceptMatch[1]);
+    if (excluded.length > 0 && excluded.length < 7) {
+      const weekdays = allWeekdays.filter(day => !excluded.includes(day));
+      return {
+        ok: true,
+        frequencyWeeks: 1,
+        weekday: weekdays[0],
+        weekdays,
+        normalizedRuleText: `每天除${formatWeekdayList(excluded)}`,
+      };
+    }
+  }
+
+  let match = source.match(/^每周(?:周|星期)?([天日一二三四五六])$/);
+  if (match) {
+    const weekday = WEEKDAY_INPUT_MAP[match[1]];
+    return {
+      ok: true,
+      frequencyWeeks: 1,
+      weekday,
+      weekdays: [weekday],
       normalizedRuleText: `每周${match[1]}`,
     };
   }
 
+  match = source.match(/^每周(.+)$/) || source.match(/^周([天日一二三四五六].*)$/);
+  if (match) {
+    const weekdays = parseWeekdayListInput(match[1]);
+    if (weekdays.length > 0) {
+      return {
+        ok: true,
+        frequencyWeeks: 1,
+        weekday: weekdays[0],
+        weekdays,
+        normalizedRuleText: buildFrequencyLabel({ frequencyWeeks: 1, weekday: weekdays[0], weekdays }),
+      };
+    }
+  }
+
   match = source.match(/^每(?:隔)?(?:两|2)周(?:周|星期)?([天日一二三四五六])$/);
   if (match) {
+    const weekday = WEEKDAY_INPUT_MAP[match[1]];
     return {
       ok: true,
       frequencyWeeks: 2,
-      weekday: weekdayMap[match[1]],
+      weekday,
+      weekdays: [weekday],
       normalizedRuleText: `每两周周${match[1]}`,
     };
   }
 
   return {
     ok: false,
-    error: '❌ 频率格式无效。示例：每周日、每周三、每两周周一、每2周周五、每隔两周周三。',
+    error: '❌ 频率格式无效。示例：每天、每天除周六、每周一三五、周一到周五、工作日、周末、每两周周三。',
   };
 }
 
@@ -309,7 +436,6 @@ function resolveBiweeklyStartDate(weekday, timezone, activeStartDate) {
 function buildReminderLine(reminder) {
   const timezone = reminder.timezone || DEFAULT_REMINDER_TIMEZONE;
   const timezoneMarker = createMarkerFromTimezone(timezone);
-  const frequencyLabel = reminder.frequencyWeeks === 2 ? '每两周' : '每周';
   const startDateLabel = reminder.frequencyWeeks === 2 && reminder.startDate
     ? `，起始日 ${reminder.startDate}`
     : '';
@@ -322,11 +448,10 @@ function buildReminderLine(reminder) {
       ? `，下次：<t:${nextUnix}:F> - <t:${nextUnix + reminder.durationSeconds}:t>（<t:${nextUnix}:R>）`
       : `，下次：<t:${nextUnix}:F>（<t:${nextUnix}:R>）`
     : '，下次：无法计算';
-  return `• **${reminder.name}**：${frequencyLabel}${formatWeekdayLabel(reminder.weekday)} ${formatClockTime(reminder.hour, reminder.minute)} ${timezoneMarker}${startDateLabel}${activeRangeLabel}${nextLine}`;
+  return `• **${reminder.name}**：${buildFrequencyLabel(reminder)} ${formatClockTime(reminder.hour, reminder.minute)} ${timezoneMarker}${startDateLabel}${activeRangeLabel}${nextLine}`;
 }
 
 function buildCreateResultMessage(reminder, config) {
-  const frequencyLabel = reminder.frequencyWeeks === 2 ? '每两周' : '每周';
   const startDateLine = reminder.frequencyWeeks === 2 ? `，起始日 ${reminder.startDate}` : '';
   const activeRangeLine = reminder.activeStartDate || reminder.activeEndDate
     ? `\n活动时间：${reminder.activeStartDate ? toDotDate(reminder.activeStartDate) : '不限'} ~ ${reminder.activeEndDate ? toDotDate(reminder.activeEndDate) : '不限'}`
@@ -336,7 +461,6 @@ function buildCreateResultMessage(reminder, config) {
   const nextParts = Number.isFinite(nextUnix)
     ? getZonedDateParts(new Date(nextUnix * 1000), timezone)
     : null;
-  const scheduleWeekday = Number.isInteger(nextParts?.weekday) ? nextParts.weekday : reminder.weekday;
   const scheduleHour = Number.isInteger(nextParts?.hour) ? nextParts.hour : reminder.hour;
   const scheduleMinute = Number.isInteger(nextParts?.minute) ? nextParts.minute : reminder.minute;
   const nextRunLine = Number.isFinite(nextUnix)
@@ -351,7 +475,7 @@ function buildCreateResultMessage(reminder, config) {
   return [
     `✅ 已建立 reminder：**${reminder.name}**`,
     `发送：<#${config.channelId}> · ${roleLine}（准点/提前 30 分钟/提前 10 分钟都会@）`,
-    `排程：${frequencyLabel}${formatWeekdayLabel(scheduleWeekday)} ${formatClockTime(scheduleHour, scheduleMinute)} ${createMarkerFromTimezone(reminder.timezone)}${startDateLine}${activeRangeLine}${nextRunLine}`,
+    `排程：${buildFrequencyLabel(reminder)} ${formatClockTime(scheduleHour, scheduleMinute)} ${createMarkerFromTimezone(reminder.timezone)}${startDateLine}${activeRangeLine}${nextRunLine}`,
     `内容：${reminder.message}`,
   ].join('\n');
 }
@@ -373,11 +497,11 @@ function weekdayToRuleSuffix(weekday) {
 }
 
 function buildReminderRuleText(reminder) {
-  const suffix = weekdayToRuleSuffix(reminder.weekday);
   if (reminder.frequencyWeeks === 2) {
+    const suffix = weekdayToRuleSuffix(getReminderWeekdays(reminder)[0] ?? reminder.weekday);
     return `每两周周${suffix}`;
   }
-  return `每周${suffix}`;
+  return buildFrequencyLabel(reminder);
 }
 
 function parseActivityPeriodInput(value, options = {}) {
@@ -459,7 +583,7 @@ function parseActivityPeriodInput(value, options = {}) {
 function createReminderFromTemplateInput({ guildId, config, name, message, frequencyRaw, activityPeriodRaw, sendTimeRaw, replaceReminderId = null }) {
   const ruleParsed = parseReminderRuleInput(frequencyRaw);
   if (!ruleParsed.ok) return ruleParsed;
-  const { frequencyWeeks, weekday: ruleWeekday } = ruleParsed;
+  const { frequencyWeeks, weekday: ruleWeekday, weekdays: ruleWeekdays } = ruleParsed;
 
   const sendTimeParsed = parseReminderSendTimeInput(sendTimeRaw);
   if (!sendTimeParsed.ok) return sendTimeParsed;
@@ -500,6 +624,7 @@ function createReminderFromTemplateInput({ guildId, config, name, message, frequ
     name,
     message,
     weekday,
+    weekdays: frequencyWeeks === 2 ? [weekday] : (ruleWeekdays || [weekday]),
     hour,
     minute,
     timezone: scheduleTimezone,
@@ -516,6 +641,7 @@ function createReminderFromTemplateInput({ guildId, config, name, message, frequ
         name: removedOriginal.name,
         message: removedOriginal.message,
         weekday: removedOriginal.weekday,
+        weekdays: removedOriginal.weekdays,
         hour: removedOriginal.hour,
         minute: removedOriginal.minute,
         timezone: removedOriginal.timezone,
@@ -658,7 +784,7 @@ module.exports = {
 
     await interaction.respond(
       filtered.map(reminder => ({
-        name: `${reminder.name} · ${reminder.frequencyWeeks === 2 ? '每两周' : '每周'}${formatWeekdayLabel(reminder.weekday)} ${formatClockTime(reminder.hour, reminder.minute)}`,
+        name: `${reminder.name} · ${buildFrequencyLabel(reminder)} ${formatClockTime(reminder.hour, reminder.minute)}`,
         value: reminder.id,
       }))
     );
@@ -865,10 +991,10 @@ module.exports = {
         .setCustomId('reminder_schedule_rule')
         .setLabel('频率')
         .setStyle(TextInputStyle.Short)
-        .setPlaceholder('示例：每周_ / 每_周周_（与下方时间联动）')
+        .setPlaceholder('例：每天除周六 / 每周一三五 / 每两周周三')
         .setRequired(true)
         .setValue(buildReminderRuleText(target))
-        .setMaxLength(20);
+        .setMaxLength(40);
 
       const sendTimeInput = new TextInputBuilder()
         .setCustomId('reminder_send_time')
@@ -964,9 +1090,9 @@ module.exports = {
       .setCustomId('reminder_schedule_rule')
       .setLabel('频率')
       .setStyle(TextInputStyle.Short)
-      .setPlaceholder('示例：每周_ / 每_周周_（与下方时间联动）')
+      .setPlaceholder('例：每天除周六 / 每周一三五 / 每两周周三')
       .setRequired(true)
-      .setMaxLength(20);
+      .setMaxLength(40);
 
     const sendTimeInput = new TextInputBuilder()
       .setCustomId('reminder_send_time')
@@ -1072,5 +1198,10 @@ module.exports = {
     forceRefreshReminderBoard(guildId).catch(error =>
       console.error('[reminder] add/edit 后刷新看板失败:', error.message)
     );
+  },
+  _private: {
+    parseReminderRuleInput,
+    buildReminderRuleText,
+    buildFrequencyLabel,
   },
 };

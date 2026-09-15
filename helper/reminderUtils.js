@@ -181,6 +181,19 @@ function matchesReminderDate(reminder, dateKey) {
   return (currentSerial - startSerial) % 14 === 0;
 }
 
+function getReminderWeekdays(reminder) {
+  if (!reminder) return [];
+
+  const source = Array.isArray(reminder.weekdays) && reminder.weekdays.length > 0
+    ? reminder.weekdays
+    : [reminder.weekday];
+
+  return [...new Set(source
+    .map(value => Number(value))
+    .filter(value => Number.isInteger(value) && value >= 0 && value <= 6))]
+    .sort((a, b) => a - b);
+}
+
 function isReminderActiveOnDate(reminder, dateKey) {
   if (!reminder) return false;
   if (!parseIsoDate(dateKey)) return false;
@@ -246,7 +259,7 @@ function computeNextReminderOccurrenceUnix(reminder, timezone, fromDate = new Da
     if (!candidateDateKey) continue;
 
     const weekday = weekdayFromIsoDate(candidateDateKey);
-    if (weekday !== reminder.weekday) continue;
+    if (!getReminderWeekdays(reminder).includes(weekday)) continue;
     if (!isReminderActiveOnDate(reminder, candidateDateKey)) continue;
     if (!matchesReminderDate(reminder, candidateDateKey)) continue;
 
@@ -282,6 +295,7 @@ module.exports = {
   getLocalScheduleFromUnix,
   getZonedDateParts,
   matchesReminderDate,
+  getReminderWeekdays,
   buildReminderSlotKey,
   parseReminderSlotKey,
   findUnixForLocalTime,

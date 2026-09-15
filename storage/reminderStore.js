@@ -11,6 +11,17 @@ const STORE_PATH = path.join(__dirname, 'reminderStore.json');
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const BD_CYCLE_SECONDS = 4 * 60 * 60;
 
+function normalizeWeekdays(rawWeekdays, fallbackWeekday) {
+  const source = Array.isArray(rawWeekdays) && rawWeekdays.length > 0
+    ? rawWeekdays
+    : [fallbackWeekday];
+
+  return [...new Set(source
+    .map(value => Number(value))
+    .filter(value => Number.isInteger(value) && value >= 0 && value <= 6))]
+    .sort((a, b) => a - b);
+}
+
 function normalizeKey(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -22,7 +33,8 @@ function isSafeObjectKey(key) {
 function normalizeReminder(raw) {
   if (!raw || typeof raw !== 'object') return null;
 
-  const weekday = Number(raw.weekday);
+  const weekdays = normalizeWeekdays(raw.weekdays, raw.weekday);
+  const weekday = weekdays[0];
   const hour = Number(raw.hour);
   const minute = Number(raw.minute);
   const frequencyWeeks = Number(raw.frequencyWeeks) === 2 ? 2 : 1;
@@ -36,7 +48,8 @@ function normalizeReminder(raw) {
   if (!String(raw.id || '').trim()) return null;
   if (!String(raw.name || '').trim()) return null;
   if (!String(raw.message || '').trim()) return null;
-  if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) return null;
+  if (!Number.isInteger(weekday) || weekdays.length === 0) return null;
+  if (frequencyWeeks === 2 && weekdays.length !== 1) return null;
   if (!Number.isInteger(hour) || hour < 0 || hour > 23) return null;
   if (!Number.isInteger(minute) || minute < 0 || minute > 59) return null;
   if (!isValidTimezone(timezone)) return null;
@@ -54,6 +67,7 @@ function normalizeReminder(raw) {
     normalizedName: normalizeReminderName(raw.name),
     message: String(raw.message),
     weekday,
+    weekdays,
     hour,
     minute,
     frequencyWeeks,
@@ -261,6 +275,7 @@ function addReminder(guildId, reminderInput) {
     name: String(reminderInput.name).trim(),
     message: String(reminderInput.message).trim(),
     weekday: reminderInput.weekday,
+    weekdays: reminderInput.weekdays,
     hour: reminderInput.hour,
     minute: reminderInput.minute,
     frequencyWeeks: reminderInput.frequencyWeeks,

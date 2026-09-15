@@ -17,7 +17,10 @@ const {
   buildReminderSlotKey,
   parseReminderSlotKey,
   isValidTimezone,
+  getReminderWeekdays,
+  computeNextReminderOccurrenceUnix,
 } = require('../helper/reminderUtils');
+const reminderCommand = require('../commands/reminder');
 
 test('parseDurationInput handles defaults, aliases, and invalid input', () => {
   assert.deepEqual(parseDurationInput(''), {
@@ -93,4 +96,41 @@ test('reminderUtils validates clocks, dates, and slot keys', () => {
   });
   assert.equal(isValidTimezone('Asia/Taipei'), true);
   assert.equal(isValidTimezone('Not/A_Timezone'), false);
+});
+
+test('reminder rule input supports daily exclusions and multi-day schedules', () => {
+  const { parseReminderRuleInput, buildReminderRuleText } = reminderCommand._private;
+
+  assert.deepEqual(parseReminderRuleInput('每天除周六'), {
+    ok: true,
+    frequencyWeeks: 1,
+    weekday: 0,
+    weekdays: [0, 1, 2, 3, 4, 5],
+    normalizedRuleText: '每天除周六',
+  });
+  assert.deepEqual(parseReminderRuleInput('每天除了周六').weekdays, [0, 1, 2, 3, 4, 5]);
+  assert.deepEqual(parseReminderRuleInput('除了周六每天').weekdays, [0, 1, 2, 3, 4, 5]);
+  assert.deepEqual(parseReminderRuleInput('每周一、三、五').weekdays, [1, 3, 5]);
+  assert.deepEqual(parseReminderRuleInput('周一到周五').weekdays, [1, 2, 3, 4, 5]);
+  assert.deepEqual(parseReminderRuleInput('工作日').weekdays, [1, 2, 3, 4, 5]);
+  assert.equal(parseReminderRuleInput('每两周周三').frequencyWeeks, 2);
+  assert.equal(parseReminderRuleInput('每天除周六').normalizedRuleText, buildReminderRuleText({ frequencyWeeks: 1, weekday: 0, weekdays: [0, 1, 2, 3, 4, 5] }));
+});
+
+test('reminderUtils computes next occurrence across multiple weekdays', () => {
+  const reminder = {
+    weekday: 0,
+    weekdays: [0, 1, 2, 3, 4, 5],
+    hour: 20,
+    minute: 30,
+    frequencyWeeks: 1,
+  };
+
+  assert.deepEqual(getReminderWeekdays(reminder), [0, 1, 2, 3, 4, 5]);
+  const nextUnix = computeNextReminderOccurrenceUnix(
+    reminder,
+    'UTC',
+    new Date(Date.UTC(2026, 8, 18, 21, 0, 0)),
+  );
+  assert.equal(nextUnix, Date.UTC(2026, 8, 20, 20, 30, 0) / 1000);
 });
