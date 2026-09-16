@@ -20,6 +20,7 @@ const {
   getReminderWeekdays,
   computeNextReminderOccurrenceUnix,
 } = require('../helper/reminderUtils');
+const { getTriggeredSlots } = require('../helper/reminderScheduler');
 const reminderCommand = require('../commands/reminder');
 
 test('parseDurationInput handles defaults, aliases, and invalid input', () => {
@@ -133,4 +134,36 @@ test('reminderUtils computes next occurrence across multiple weekdays', () => {
     new Date(Date.UTC(2026, 8, 18, 21, 0, 0)),
   );
   assert.equal(nextUnix, Date.UTC(2026, 8, 20, 20, 30, 0) / 1000);
+});
+
+test('reminderScheduler triggers advance reminders from the scanned minute', () => {
+  const reminder = {
+    weekday: 4,
+    weekdays: [4],
+    hour: 20,
+    minute: 30,
+    frequencyWeeks: 1,
+  };
+
+  assert.deepEqual(
+    getTriggeredSlots(reminder, 'UTC', new Date(Date.UTC(2026, 8, 17, 20, 20, 10))),
+    [
+      {
+        slotKey: '2026-09-17T20:20|pre-10m',
+        kind: 'pre-10m',
+        unix: Date.UTC(2026, 8, 17, 20, 20, 0) / 1000,
+      },
+    ],
+  );
+
+  assert.deepEqual(
+    getTriggeredSlots(reminder, 'UTC', new Date(Date.UTC(2026, 8, 17, 20, 21, 5))),
+    [
+      {
+        slotKey: '2026-09-17T20:20|pre-10m',
+        kind: 'pre-10m',
+        unix: Date.UTC(2026, 8, 17, 20, 20, 0) / 1000,
+      },
+    ],
+  );
 });

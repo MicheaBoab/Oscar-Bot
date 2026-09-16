@@ -10,6 +10,9 @@ const {
   getZonedDateParts,
   parseReminderSlotKey,
   findUnixForLocalTime,
+  getReminderWeekdays,
+  matchesReminderDate,
+  isReminderActiveOnDate,
 } = require('./reminderUtils');
 
 const CHECK_INTERVAL_MS = 30 * 1000;
@@ -22,6 +25,8 @@ let schedulerClient = null;
 let schedulerTimer = null;
 let schedulerInFlight = false;
 const boardLastUpdatedAt = new Map();
+const ADVANCE_REMINDER_SECONDS = 10 * 60;
+const ADVANCE_REMINDER_KIND = 'pre-10m';
 
 function clearSchedulerTimer() {
   if (schedulerTimer) {
@@ -30,30 +35,40 @@ function clearSchedulerTimer() {
   }
 }
 
-function getTriggeredSlots(reminder, timezone, now = new Date()) {
+function reminderMatchesOccurrence(reminder, timezone, occurrenceUnix) {
+  const occurrenceParts = getZonedDateParts(new Date(occurrenceUnix * 1000), timezone);
+  if (occurrenceParts.hour !== reminder.hour || occurrenceParts.minute !== reminder.minute) return false;
+  if (!getReminderWeekdays(reminder).includes(occurrenceParts.weekday)) return false;
+  if (!isReminderActiveOnDate(reminder, occurrenceParts.dateKey)) return false;
+  return matchesReminderDate(reminder, occurrenceParts.dateKey);
+}
+
+function getRecentTriggerMinuteUnix(now) {
   const nowTs = now.getTime();
-  const fromDate = new Date(nowTs - 60 * 1000);
-  const nextUnix = computeNextReminderOccurrenceUnix(reminder, timezone, fromDate);
-  if (!Number.isFinite(nextUnix)) return [];
+  const firstMinuteUnix = Math.floor((nowTs - 60 * 1000) / 60000) * 60;
+  const lastMinuteUnix = Math.floor(nowTs / 60000) * 60;
+  const minutes = [];
 
-  const nowParts = getZonedDateParts(now, timezone);
-  const triggerCandidates = [
-    { kind: 'pre-10m', unix: nextUnix - 10 * 60 },
-  ];
+  for (let unix = firstMinuteUnix; unix <= lastMinuteUnix; unix += 60) {
+    minutes.push(unix);
+  }
 
-  return triggerCandidates
+  return minutes;
+}
+
+function getTriggeredSlots(reminder, timezone, now = new Date()) {
+  return getRecentTriggerMinuteUnix(now)
+    .map(triggerUnix => ({
+      kind: ADVANCE_REMINDER_KIND,
+      triggerUnix,
+      occurrenceUnix: triggerUnix + ADVANCE_REMINDER_SECONDS,
+    }))
+    .filter(candidate => reminderMatchesOccurrence(reminder, timezone, candidate.occurrenceUnix))
     .map(candidate => {
-      const candidateParts = getZonedDateParts(new Date(candidate.unix * 1000), timezone);
-      const isCurrentMinute = candidateParts.dateKey === nowParts.dateKey
-        && candidateParts.hour === nowParts.hour
-        && candidateParts.minute === nowParts.minute;
-      if (!isCurrentMinute) return null;
-
-      const slotKey = buildReminderSlotKey(candidateParts.dateKey, candidateParts.hour, candidateParts.minute, candidate.kind);
-      return { slotKey, kind: candidate.kind, unix: candidate.unix };
-    })
-    .filter(Boolean)
-    .filter(entry => entry.unix >= Math.floor(nowTs / 1000) - 60);
+      const triggerParts = getZonedDateParts(new Date(candidate.triggerUnix * 1000), timezone);
+      const slotKey = buildReminderSlotKey(triggerParts.dateKey, triggerParts.hour, triggerParts.minute, candidate.kind);
+      return { slotKey, kind: candidate.kind, unix: candidate.triggerUnix };
+    });
 }
 
 function getTriggeredSlot(reminder, timezone, now = new Date()) {
@@ -63,7 +78,7 @@ function getTriggeredSlot(reminder, timezone, now = new Date()) {
 
 function resolveEventStartUnix(triggerUnix, kind) {
   if (!Number.isFinite(triggerUnix)) return null;
-  if (kind === 'pre-10m') return triggerUnix + 10 * 60;
+  if (kind === ADVANCE_REMINDER_KIND) return triggerUnix + ADVANCE_REMINDER_SECONDS;
   return triggerUnix;
 }
 
@@ -105,10 +120,6 @@ function getDayNightSummary(now = new Date(), config = {}) {
 
 async function processGuildReminders(client, guildId, config) {
   if (!config || !Array.isArray(config.reminders) || config.reminders.length === 0) return;
-
-  if (!config.boardChannelId) {
-    return;
-  }
 
   const roleIds = Array.isArray(config.roleIds) && config.roleIds.length > 0
     ? config.roleIds
@@ -330,6 +341,7 @@ module.exports = {
   startReminderScheduler,
   runReminderScan,
   getTriggeredSlot,
+  getTriggeredSlots,
   forceRefreshReminderBoard,
   refreshReminderBoardForGuild,
 };

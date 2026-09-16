@@ -474,7 +474,7 @@ function buildCreateResultMessage(reminder, config) {
 
   return [
     `✅ 已建立 reminder：**${reminder.name}**`,
-    `发送：<#${config.channelId}> · ${roleLine}（准点/提前 30 分钟/提前 10 分钟都会@）`,
+    `发送：<#${config.channelId}> · ${roleLine}（提前 10 分钟@）`,
     `排程：${buildFrequencyLabel(reminder)} ${formatClockTime(scheduleHour, scheduleMinute)} ${createMarkerFromTimezone(reminder.timezone)}${startDateLine}${activeRangeLine}${nextRunLine}`,
     `内容：${reminder.message}`,
   ].join('\n');
