@@ -1,6 +1,6 @@
 const path = require('path');
 const fs = require('fs');
-const { title } = require('process');
+const { randomUUID } = require('crypto');
 
 const POLL_DIR = path.join(__dirname, 'polls');
 const ARCHIVE_DIR = path.join(__dirname, 'archive');
@@ -31,17 +31,18 @@ if (!fs.existsSync(ARCHIVE_DIR)) {
 
 // 获取当前投票名称
 function getPollPath(titlename) {
+  if (typeof titlename !== 'string' || !titlename || /[\\/\u0000]/.test(titlename)) throw new Error('Invalid poll key');
   return path.join(POLL_DIR, `poll_${titlename}.json`);
 }
 
 // archive停止的投票
 function archivePoll(titlename) {
-  const sourcePath = path.join(POLL_DIR, `poll_${titlename}.json`);
+  const sourcePath = getPollPath(titlename);
   if (!fs.existsSync(sourcePath)) {
     return false;
   }
   const readableTime = formatDateForFilename(new Date());
-  const archiveFileName = `poll_${titlename}_${readableTime}.json`;
+  const archiveFileName = `poll_${titlename}_${readableTime}_${randomUUID()}.json`;
   const targetPath = path.join(ARCHIVE_DIR, archiveFileName);
   //const targetPath = path.join(ARCHIVE_DIR, `${titlename}_${formatDateForFilename(new Date.now())}.json`);
 
@@ -53,7 +54,18 @@ function archivePoll(titlename) {
 // 创建投票文件
 function createPoll(title, data) {
   const filePath = getPollPath(title);
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+  if (fs.existsSync(filePath)) throw new Error('Poll already exists');
+  writePoll(filePath, data);
+}
+
+function writePoll(filePath, data) {
+  const temporary = `${filePath}.${randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temporary, JSON.stringify(data, null, 2));
+    fs.renameSync(temporary, filePath);
+  } finally {
+    if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+  }
 }
 
 // 读取投票
@@ -66,7 +78,7 @@ function loadPoll(title) {
 // 更新投票
 function updatePoll(title, data) {
   const filePath = getPollPath(title);
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+  writePoll(filePath, data);
 }
 
 // 检测poll名字是否存在
@@ -99,6 +111,7 @@ function loadAllPolls() {
       const data = JSON.parse(raw);
 
       polls.push({
+        key: file.replace(/^poll_/, '').replace(/\.json$/, ''),
         data,             // 你给出的结构
       });
     } catch (err) {
@@ -114,7 +127,7 @@ function listPolls() {
   return fs
     .readdirSync(POLL_DIR)
     .filter(f => f.startsWith('poll_') && f.endsWith('.json'))
-    .map(f => f.replace('poll_', '').replace('.json', ''));
+    .map(f => f.replace(/^poll_/, '').replace(/\.json$/, ''));
 }
 
 function findPollsByTitle(title) {

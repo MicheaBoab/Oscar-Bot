@@ -1,7 +1,7 @@
 const { resolveItemMeta } = require('../storage/itemNameStore');
 const { writeEnhRangeToTable } = require('../storage/itemNameStore');
 const { ensureLocalIcon } = require('../storage/localIconStore');
-const { getAllLiveQueues, updateMessageIds } = require('../storage/liveQueueStore');
+const queueStore = require('../storage/liveQueueStore');
 const { getGuildWatches, getLastSeenMatch, setLastSeenMatch } = require('../storage/watchStore');
 const {
   parseWaitList,
@@ -11,13 +11,15 @@ const {
   EMBEDS_PER_MSG,
   REGION_BASE_URL,
   resolveEnhRange,
-} = require('../commands/showqueue');
+} = require('./marketQueueFormatting');
 
 const SCAN_INTERVAL_MS = 60 * 1000; // 1 分钟
 const ICON_CONCURRENCY = 5;
 let schedulerClient = null;
 let schedulerTimer = null;
-let schedulerInFlight = false;
+const inFlight = new Map();
+const lastManualRefresh = new Map();
+const REFRESH_COOLDOWN_MS = 10000;
 
 async function fetchQueueItems() {
   const url = `${REGION_BASE_URL.na}/Trademarket/GetWorldMarketWaitList`;
@@ -34,9 +36,10 @@ async function fetchQueueItems() {
   return parseWaitList(data.resultMsg);
 }
 
-async function prepareItems(items, pendingRangeUpdates) {
+async function prepareItems(items, pendingRangeUpdates, current = () => true) {
   const prepared = new Array(items.length);
   for (let i = 0; i < items.length; i += ICON_CONCURRENCY) {
+    if (!current()) return [];
     const batch = items.slice(i, i + ICON_CONCURRENCY);
     const results = await Promise.all(
       batch.map(async (item) => {
@@ -62,11 +65,12 @@ function normalizeEnhancementLabel(value) {
   return text || 'BASE';
 }
 
-async function sendWatchNotifications(channel, guildId, preparedItems) {
+async function sendWatchNotifications(channel, guildId, preparedItems, current = () => true) {
   const watches = getGuildWatches(guildId);
   if (!Array.isArray(watches) || watches.length === 0) return;
 
   for (const watch of watches) {
+    if (!current()) return;
     const matchedEntry = preparedItems.find(({ item, enhRange, enhanceTag }) => {
       if (String(item.itemId) !== String(watch.itemId)) return false;
       if (!watch.enhancement) return true;
@@ -87,19 +91,23 @@ async function sendWatchNotifications(channel, guildId, preparedItems) {
         await channel.send(payload);
       } catch (err) {
         console.error(`[liveQueue] guild ${guildId} 发送 watch 通知失败:`, err.message);
+        continue;
       }
     }
 
-    if (wasMatched !== isMatched) {
+    if (current() && wasMatched !== isMatched) {
       setLastSeenMatch(guildId, watch.id, isMatched);
     }
   }
 }
 
-async function doQueueUpdateForGuild(client, guildId) {
-  const allQueues = getAllLiveQueues();
+async function performQueueUpdate(client, guildId) {
+  const allQueues = queueStore.getAllLiveQueues();
   const config = allQueues[guildId];
-  if (!config) return;
+  if (!config) return { status: 'unconfigured' };
+  if (config.active === false) return { status: 'stopped' };
+  const current = () => { const latest = queueStore.getLiveQueue(guildId); return latest?.active !== false && latest?.revision === config.revision; };
+  if (!current()) return { status: 'stopped' };
 
   let queueChannel = null;
   const queueChannelId = config.channelId || null;
@@ -127,9 +135,15 @@ async function doQueueUpdateForGuild(client, guildId) {
     }
   }
 
-  // 拉取队列，失败则静默跳过本次更新
+  if ((queueChannelId && !queueChannel) || (watchChannelId && !watchChannel)) {
+    throw new Error('通知频道不可用，请管理员重新设置。');
+  }
+  if (!queueChannel && !watchChannel) throw new Error('尚未设置通知频道。');
+
+  // 拉取最新数据；失败交由调用方报告并在下次扫描重试。
   let activeItems = [];
   try {
+    if (!current()) return { status: 'stopped' };
     const items = await fetchQueueItems();
     const now = Math.floor(Date.now() / 1000);
     // 过滤掉已超时超过 1 分钟的物品
@@ -138,7 +152,7 @@ async function doQueueUpdateForGuild(client, guildId) {
     );
   } catch (err) {
     console.error(`[liveQueue] guild ${guildId} 拉取队列失败:`, err.message);
-    return;
+    throw err;
   }
 
   // 对去重 itemId 拉取强化范围（in-memory pending，最后批量写入 JSON）
@@ -146,6 +160,7 @@ async function doQueueUpdateForGuild(client, guildId) {
   if (activeItems.length > 0) {
     const uniqueItemIds = [...new Set(activeItems.map(i => i.itemId))];
     for (let i = 0; i < uniqueItemIds.length; i += ICON_CONCURRENCY) {
+      if (!current()) return { status: 'stopped' };
       await Promise.all(
         uniqueItemIds.slice(i, i + ICON_CONCURRENCY).map(id =>
           resolveEnhRange(id, REGION_BASE_URL.na, pendingRangeUpdates)
@@ -155,14 +170,18 @@ async function doQueueUpdateForGuild(client, guildId) {
   }
 
   // 准备物品数据（并发下载图标）
-  const preparedItems = activeItems.length > 0 ? await prepareItems(activeItems, pendingRangeUpdates) : [];
+  if (!current()) return { status: 'stopped' };
+  const preparedItems = activeItems.length > 0 ? await prepareItems(activeItems, pendingRangeUpdates, current) : [];
 
+  if (!current()) return { status: 'stopped' };
   if (watchChannel) {
-    await sendWatchNotifications(watchChannel, guildId, preparedItems);
+    await sendWatchNotifications(watchChannel, guildId, preparedItems, current);
   }
 
+  if (!current()) return { status: 'stopped' };
   if (!queueChannel) {
-    return;
+    writeEnhRangeToTable(pendingRangeUpdates);
+    return { status: 'updated' };
   }
 
   // 分块（Discord 每条消息最多 10 个 embed）
@@ -194,7 +213,8 @@ async function doQueueUpdateForGuild(client, guildId) {
     try {
       const message = await queueChannel.messages.fetch(msgId);
       currentMessages.push(message);
-    } catch {
+    } catch (error) {
+      if (error.code !== 10008) throw error;
       // 消息不存在或不可访问，忽略
     }
   }
@@ -202,23 +222,28 @@ async function doQueueUpdateForGuild(client, guildId) {
   const finalMessageIds = [];
   try {
     for (let i = 0; i < desiredPayloads.length; i++) {
+      if (!current()) return { status: 'stopped' };
       const payload = desiredPayloads[i];
       const existingMessage = currentMessages[i];
 
       if (existingMessage) {
         const edited = await existingMessage.edit(payload);
         finalMessageIds.push(edited.id);
+        queueStore.updateMessageIds(guildId, [...finalMessageIds, ...currentMessages.slice(i + 1).map(m => m.id)], queueChannelId);
       } else {
         const created = await queueChannel.send(payload);
         finalMessageIds.push(created.id);
+        queueStore.updateMessageIds(guildId, [...finalMessageIds, ...currentMessages.slice(i + 1).map(m => m.id)], queueChannelId);
       }
     }
   } catch (err) {
     console.error(`[liveQueue] guild ${guildId} 更新消息失败:`, err.message);
-    return;
+    throw err;
   }
 
+  if (!current()) return { status: 'stopped' };
   for (let i = desiredPayloads.length; i < currentMessages.length; i++) {
+    if (!current()) return { status: 'stopped' };
     try {
       await currentMessages[i].delete();
     } catch {
@@ -226,16 +251,17 @@ async function doQueueUpdateForGuild(client, guildId) {
     }
   }
 
-  updateMessageIds(guildId, finalMessageIds);
+  queueStore.updateMessageIds(guildId, finalMessageIds, queueChannelId);
 
   // 所有 embed 更新完毕，批量将本轮新拉取的范围写入 JSON
   writeEnhRangeToTable(pendingRangeUpdates);
+  return { status: 'updated' };
 }
 
 async function runAllGuilds(client) {
-  const allQueues = getAllLiveQueues();
+  const allQueues = queueStore.getAllLiveQueues();
   for (const guildId of Object.keys(allQueues)) {
-    await doQueueUpdateForGuild(client, guildId);
+    try { await doQueueUpdateForGuild(client, guildId); } catch (error) { console.error('[market]', guildId, error.message); }
   }
 }
 
@@ -246,12 +272,10 @@ function scheduleNextRun() {
   }
   schedulerTimer = setTimeout(async () => {
     try {
-      schedulerInFlight = true;
       await runAllGuilds(schedulerClient);
     } catch (err) {
       console.error('[liveQueue] 自动扫描失败:', err);
     } finally {
-      schedulerInFlight = false;
       scheduleNextRun();
     }
   }, SCAN_INTERVAL_MS);
@@ -263,29 +287,27 @@ function startLiveQueueScheduler(client) {
   scheduleNextRun();
 }
 
-async function forceRefreshAndReset(guildId) {
-  if (!schedulerClient) {
-    throw new Error('scheduler not started');
-  }
-  if (schedulerInFlight) {
-    throw new Error('refresh in progress');
-  }
-
-  schedulerInFlight = true;
-  try {
-    if (guildId) {
-      await doQueueUpdateForGuild(schedulerClient, guildId);
-    } else {
-      await runAllGuilds(schedulerClient);
-    }
-  } finally {
-    schedulerInFlight = false;
-    scheduleNextRun();
-  }
+function doQueueUpdateForGuild(client, guildId) {
+  if (inFlight.has(guildId)) return inFlight.get(guildId);
+  const task = performQueueUpdate(client, guildId).finally(() => { if (inFlight.get(guildId) === task) inFlight.delete(guildId); });
+  inFlight.set(guildId, task);
+  return task;
 }
-
-module.exports = {
-  startLiveQueueScheduler,
-  doQueueUpdateForGuild,
-  forceRefreshAndReset,
-};
+async function refreshMarket(client, guildId) {
+  const config = queueStore.getLiveQueue(guildId);
+  if (!config) return { status: 'unconfigured' };
+  if (config.active === false) return { status: 'stopped' };
+  if (inFlight.has(guildId)) return inFlight.get(guildId);
+  if (Date.now() - (lastManualRefresh.get(guildId) || 0) < REFRESH_COOLDOWN_MS) return { status: 'cooldown' };
+  lastManualRefresh.set(guildId, Date.now());
+  return doQueueUpdateForGuild(client, guildId);
+}
+async function waitForGuildUpdate(guildId) {
+  await inFlight.get(guildId)?.catch(() => {});
+}
+// Legacy name remains callable, but manual refresh no longer resets the schedule.
+async function forceRefreshAndReset(guildId) {
+  if (!schedulerClient) throw new Error('scheduler not started');
+  return refreshMarket(schedulerClient, guildId);
+}
+module.exports = { startLiveQueueScheduler, doQueueUpdateForGuild, refreshMarket, waitForGuildUpdate, forceRefreshAndReset };

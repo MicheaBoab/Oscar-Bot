@@ -253,6 +253,16 @@ function updateReminderBoardMessageId(guildId, messageId) {
   return store[guildKey];
 }
 
+function saveReminderBoardLocation(guildId, { channelId, messageId }) {
+  const store = loadStore();
+  const key = normalizeKey(guildId);
+  if (!ensureGuild(store, key)) throw new Error('Invalid guild');
+  store[key].boardChannelId = channelId;
+  store[key].boardMessageId = messageId;
+  saveStore(store);
+  return store[key];
+}
+
 function addReminder(guildId, reminderInput) {
   const store = loadStore();
   const guildKey = normalizeKey(guildId);
@@ -329,6 +339,7 @@ function updateReminderLastTriggered(guildId, reminderId, slotKey) {
 }
 
 module.exports = {
+  saveReminderBoardLocation,
   getReminderConfig,
   getAllReminderConfigs,
   setReminderChannel,

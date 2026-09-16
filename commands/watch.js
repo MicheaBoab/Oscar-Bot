@@ -239,7 +239,7 @@ ${lines.join('\n')}`,
     }
 
     await interaction.reply({
-      content: `✅ 关注成功：${result.watch.itemName}${enhancement ? `（${enhancement}）` : ''}\n命中 queue 时会在自动队列频道 @你。`,
+      content: `✅ 关注成功：${result.watch.itemName}${enhancement ? `（${enhancement}）` : ''}\n追踪运行中命中队列时，会在上架提醒频道 @你。`,
       flags: 64,
     });
   },

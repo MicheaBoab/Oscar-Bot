@@ -31,3 +31,5 @@ Thumbs.db
 storage/*
 !storage/attendanceStore.js
 !storage/attendanceSettingsStore.js
+!storage/controlPanelStore.js
+!storage/announcementStore.js

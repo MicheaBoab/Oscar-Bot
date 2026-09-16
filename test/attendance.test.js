@@ -71,7 +71,7 @@ test('职业报名组件包含继承觉醒和管理员操作', () => {
 
   assert.ok(firstRowLabels.includes('⚔️ 继承/觉醒 / ⚔️ Succession/Awakening'));
   assert.ok(adminOptions.includes('🧩 分队管理 / 🧩 Manage teams'));
-  assert.ok(adminOptions.includes('📍 更新分组频道 / 📍 Set team channel'));
+  assert.ok(!adminOptions.includes('📍 更新分组频道 / 📍 Set team channel'));
   assert.ok(adminOptions.includes('🔄 刷新玩家名称 / 🔄 Refresh names'));
 });
 

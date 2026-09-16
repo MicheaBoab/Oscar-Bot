@@ -1,5 +1,4 @@
 const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
-const { setWatchChannel } = require('../storage/liveQueueStore');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -15,14 +14,6 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   async execute(interaction) {
-    const channel = interaction.options.getChannel('channel');
-    const guildId = interaction.guildId;
-
-    setWatchChannel(guildId, channel.id);
-
-    await interaction.reply({
-      content: `✅ 已将 watch 通知频道设置为 ${channel}。后续命中只会在该频道 @用户。`,
-      flags: 64,
-    });
+    await require('../helper/marketActions').configure(interaction, 'watch-channel', interaction.options.getChannel('channel', true).id);
   },
 };

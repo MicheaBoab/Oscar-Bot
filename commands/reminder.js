@@ -6,12 +6,14 @@ const {
   TextInputBuilder,
   TextInputStyle,
   ActionRowBuilder,
+  ChannelSelectMenuBuilder,
+  RoleSelectMenuBuilder,
+  StringSelectMenuBuilder,
 } = require('discord.js');
 const {
   getReminderConfig,
   setReminderChannel,
   setReminderRole,
-  setReminderBoardChannel,
   setReminderDayNightSyncAnchor,
   addReminder,
   getGuildReminders,
@@ -433,24 +435,6 @@ function resolveBiweeklyStartDate(weekday, timezone, activeStartDate) {
   return { ok: true, startDate };
 }
 
-function buildReminderLine(reminder) {
-  const timezone = reminder.timezone || DEFAULT_REMINDER_TIMEZONE;
-  const timezoneMarker = createMarkerFromTimezone(timezone);
-  const startDateLabel = reminder.frequencyWeeks === 2 && reminder.startDate
-    ? `，起始日 ${reminder.startDate}`
-    : '';
-  const activeRangeLabel = reminder.activeStartDate || reminder.activeEndDate
-    ? `，活动时间 ${reminder.activeStartDate ? toDotDate(reminder.activeStartDate) : '不限'} ~ ${reminder.activeEndDate ? toDotDate(reminder.activeEndDate) : '不限'}`
-    : '';
-  const nextUnix = computeNextReminderOccurrenceUnix(reminder, timezone);
-  const nextLine = Number.isFinite(nextUnix)
-    ? reminder.durationSeconds
-      ? `，下次：<t:${nextUnix}:F> - <t:${nextUnix + reminder.durationSeconds}:t>（<t:${nextUnix}:R>）`
-      : `，下次：<t:${nextUnix}:F>（<t:${nextUnix}:R>）`
-    : '，下次：无法计算';
-  return `• **${reminder.name}**：${buildFrequencyLabel(reminder)} ${formatClockTime(reminder.hour, reminder.minute)} ${timezoneMarker}${startDateLabel}${activeRangeLabel}${nextLine}`;
-}
-
 function buildCreateResultMessage(reminder, config) {
   const startDateLine = reminder.frequencyWeeks === 2 ? `，起始日 ${reminder.startDate}` : '';
   const activeRangeLine = reminder.activeStartDate || reminder.activeEndDate
@@ -489,6 +473,230 @@ function createMarkerFromTimezone(timezone) {
 function buildSendTimeInputValue(reminder) {
   const marker = createMarkerFromTimezone(reminder.timezone || DEFAULT_REMINDER_TIMEZONE);
   return `${formatClockTime(reminder.hour, reminder.minute)} ${marker}`.trim();
+}
+
+function buildReminderAddModal() {
+  const modal = new ModalBuilder()
+    .setCustomId('reminder_add_modal')
+    .setTitle('新增定时提醒');
+
+  const nameInput = new TextInputBuilder()
+    .setCustomId('reminder_name')
+    .setLabel('名称')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('示例：weekly-boss')
+    .setRequired(true)
+    .setMaxLength(80);
+
+  const messageInput = new TextInputBuilder()
+    .setCustomId('reminder_message')
+    .setLabel('提醒内容')
+    .setStyle(TextInputStyle.Paragraph)
+    .setPlaceholder('示例：世界王 15 分钟后开始集合')
+    .setRequired(true)
+    .setMaxLength(1000);
+
+  const frequencyInput = new TextInputBuilder()
+    .setCustomId('reminder_schedule_rule')
+    .setLabel('频率')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('例：每天除周六 / 每周一三五 / 每两周周三')
+    .setRequired(true)
+    .setMaxLength(40);
+
+  const sendTimeInput = new TextInputBuilder()
+    .setCustomId('reminder_send_time')
+    .setLabel('提醒发出时间（24小时制）')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('格式 HH:MM TZ，例 20:30 CDT')
+    .setRequired(true)
+    .setMaxLength(40);
+
+  const activePeriodInput = new TextInputBuilder()
+    .setCustomId('reminder_activity_period')
+    .setLabel('活动时间（选填）')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('格式 MM.DD.YYYY-MM.DD.YYYY [TZ]')
+    .setRequired(false)
+    .setMaxLength(80);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(nameInput),
+    new ActionRowBuilder().addComponents(messageInput),
+    new ActionRowBuilder().addComponents(frequencyInput),
+    new ActionRowBuilder().addComponents(sendTimeInput),
+    new ActionRowBuilder().addComponents(activePeriodInput),
+  );
+
+  return modal;
+}
+
+function buildReminderEditModal(target) {
+  const modal = new ModalBuilder()
+    .setCustomId(`reminder_edit_modal_${target.id}`)
+    .setTitle(`编辑提醒：${target.name}`);
+
+  const nameInput = new TextInputBuilder()
+    .setCustomId('reminder_name')
+    .setLabel('名称')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('示例：weekly-boss')
+    .setRequired(true)
+    .setValue(target.name)
+    .setMaxLength(80);
+
+  const messageInput = new TextInputBuilder()
+    .setCustomId('reminder_message')
+    .setLabel('提醒内容')
+    .setStyle(TextInputStyle.Paragraph)
+    .setPlaceholder('示例：世界王 15 分钟后开始集合')
+    .setRequired(true)
+    .setValue(target.message)
+    .setMaxLength(1000);
+
+  const frequencyInput = new TextInputBuilder()
+    .setCustomId('reminder_schedule_rule')
+    .setLabel('频率')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('例：每天除周六 / 每周一三五 / 每两周周三')
+    .setRequired(true)
+    .setValue(buildReminderRuleText(target))
+    .setMaxLength(40);
+
+  const sendTimeInput = new TextInputBuilder()
+    .setCustomId('reminder_send_time')
+    .setLabel('提醒发出时间（24小时制）')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('格式 HH:MM TZ，例 20:30 CDT')
+    .setRequired(true)
+    .setValue(buildSendTimeInputValue(target))
+    .setMaxLength(40);
+
+  const activePeriodInput = new TextInputBuilder()
+    .setCustomId('reminder_activity_period')
+    .setLabel('活动时间（选填）')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('格式 MM.DD.YYYY-MM.DD.YYYY [TZ]')
+    .setRequired(false)
+    .setValue(
+      target.activeStartDate && target.activeEndDate
+        ? `${toDotDate(target.activeStartDate)}-${toDotDate(target.activeEndDate)}`
+        : ''
+    )
+    .setMaxLength(80);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(nameInput),
+    new ActionRowBuilder().addComponents(messageInput),
+    new ActionRowBuilder().addComponents(frequencyInput),
+    new ActionRowBuilder().addComponents(sendTimeInput),
+    new ActionRowBuilder().addComponents(activePeriodInput),
+  );
+
+  return modal;
+}
+
+function buildDayNightSyncModal() {
+  const modal = new ModalBuilder()
+    .setCustomId('reminder_daynight_modal')
+    .setTitle('同步日夜看板');
+
+  const phaseInput = new TextInputBuilder()
+    .setCustomId('reminder_daynight_phase')
+    .setLabel('游戏内阶段')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('am 或 pm')
+    .setRequired(true)
+    .setMaxLength(2);
+
+  const timeInput = new TextInputBuilder()
+    .setCustomId('reminder_daynight_time')
+    .setLabel('当前游戏内时间')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('示例：7:31、12:05')
+    .setRequired(true)
+    .setMaxLength(8);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(phaseInput),
+    new ActionRowBuilder().addComponents(timeInput),
+  );
+
+  return modal;
+}
+
+function findReminderByInput(guildId, rawInput) {
+  const reminders = getGuildReminders(guildId);
+  return reminders.find(reminder => reminder.id === rawInput)
+    || reminders.find(reminder => reminder.normalizedName === normalizeReminderName(rawInput));
+}
+
+function buildReminderActionSelect(guildId, action) {
+  const reminders = getGuildReminders(guildId).slice(0, 25);
+  if (reminders.length === 0) return null;
+
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`reminder_select_${action}`)
+      .setPlaceholder(action === 'edit' ? '选择要编辑的提醒' : '选择要删除的提醒')
+      .addOptions(reminders.map(reminder => ({
+        label: reminder.name.slice(0, 100),
+        description: `${buildFrequencyLabel(reminder)} ${formatClockTime(reminder.hour, reminder.minute)}`.slice(0, 100),
+        value: reminder.id,
+      }))),
+  );
+}
+
+function buildReminderChannelSelect() {
+  return new ActionRowBuilder().addComponents(
+    new ChannelSelectMenuBuilder()
+      .setCustomId('reminder_channel_select')
+      .setPlaceholder('选择提醒要发送到的频道')
+      .addChannelTypes(ChannelType.GuildText),
+  );
+}
+
+function buildReminderRoleSelect() {
+  return new ActionRowBuilder().addComponents(
+    new RoleSelectMenuBuilder()
+      .setCustomId('reminder_role_select')
+      .setPlaceholder('选择提醒要 @ 的身分组')
+      .setMinValues(1)
+      .setMaxValues(5),
+  );
+}
+
+async function openReminderAddModal(interaction) {
+  const guildId = interaction.guildId;
+  const config = getReminderConfig(guildId) || {
+    channelId: null,
+    roleId: null,
+    roleIds: [],
+    timezone: DEFAULT_REMINDER_TIMEZONE,
+    reminders: [],
+  };
+
+  if (!config.channelId) {
+    await interaction.reply({
+      content: '❌ 请先在 reminder 看板的管理员菜单里设置提醒频道。',
+      flags: 64,
+    });
+    return;
+  }
+
+  if (!Array.isArray(config.roleIds) || config.roleIds.length === 0) {
+    await interaction.reply({
+      content: '❌ 请先在 reminder 看板的管理员菜单里设置提醒身分组。',
+      flags: 64,
+    });
+    return;
+  }
+
+  await interaction.showModal(buildReminderAddModal());
+}
+
+function canManageReminders(interaction) {
+  return interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) === true;
 }
 
 function weekdayToRuleSuffix(weekday) {
@@ -675,28 +883,6 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addSubcommand(subcommand =>
       subcommand
-        .setName('set-channel')
-        .setDescription('设置提醒要发送到的频道')
-        .addChannelOption(option =>
-          option
-            .setName('channel')
-            .setDescription('提醒发送频道')
-            .addChannelTypes(ChannelType.GuildText)
-            .setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('set-role')
-        .setDescription('设置提醒时要@的身分组（可选多个）')
-        .addRoleOption(option => option.setName('role1').setDescription('第 1 个提醒身分组').setRequired(false))
-        .addRoleOption(option => option.setName('role2').setDescription('第 2 个提醒身分组').setRequired(false))
-        .addRoleOption(option => option.setName('role3').setDescription('第 3 个提醒身分组').setRequired(false))
-        .addRoleOption(option => option.setName('role4').setDescription('第 4 个提醒身分组').setRequired(false))
-        .addRoleOption(option => option.setName('role5').setDescription('第 5 个提醒身分组').setRequired(false))
-    )
-    .addSubcommand(subcommand =>
-      subcommand
         .setName('set-board-channel')
         .setDescription('设置倒计时看板要发送到的频道')
         .addChannelOption(option =>
@@ -706,425 +892,187 @@ module.exports = {
             .addChannelTypes(ChannelType.GuildText)
             .setRequired(true)
         )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('refresh-board')
-        .setDescription('立即刷新一次倒计时看板')
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('sync-daynight')
-        .setDescription('按当前游戏内时间同步日夜看板')
-        .addStringOption(option =>
-          option
-            .setName('phase')
-            .setDescription('游戏内阶段（am 或 pm）')
-            .setRequired(true)
-            .addChoices(
-              { name: 'am', value: 'am' },
-              { name: 'pm', value: 'pm' },
-            )
-        )
-        .addStringOption(option =>
-          option
-            .setName('time')
-            .setDescription('游戏内时间（12小时制），示例：7:31、12:05')
-            .setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('add')
-        .setDescription('打开弹窗，一次性填写 reminder')
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('edit')
-        .setDescription('按名称编辑 reminder')
-        .addStringOption(option =>
-          option
-            .setName('name')
-            .setDescription('要编辑的 reminder 名称')
-            .setRequired(true)
-            .setAutocomplete(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('list')
-        .setDescription('列出当前所有 reminder')
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('remove')
-        .setDescription('删除一个 reminder')
-        .addStringOption(option =>
-          option
-            .setName('reminder')
-            .setDescription('要删除的 reminder')
-            .setRequired(true)
-            .setAutocomplete(true)
-        )
     ),
-
-  async autocomplete(interaction) {
-    const focused = interaction.options.getFocused(true);
-    if (focused.name !== 'reminder' && focused.name !== 'name') {
-      await interaction.respond([]);
-      return;
-    }
-
-    const reminders = getGuildReminders(interaction.guildId);
-    const query = String(focused.value || '').trim().toLowerCase();
-    const filtered = reminders.filter(reminder => {
-      if (!query) return true;
-      return reminder.name.toLowerCase().includes(query);
-    }).slice(0, 25);
-
-    await interaction.respond(
-      filtered.map(reminder => ({
-        name: `${reminder.name} · ${buildFrequencyLabel(reminder)} ${formatClockTime(reminder.hour, reminder.minute)}`,
-        value: reminder.id,
-      }))
-    );
-  },
 
   async execute(interaction) {
     const subcommand = interaction.options.getSubcommand();
-    const guildId = interaction.guildId;
-
-    if (subcommand === 'set-channel') {
-      const channel = interaction.options.getChannel('channel', true);
-      setReminderChannel(guildId, channel.id);
-      await interaction.reply({
-        content: `✅ reminder 发送频道已设置为 ${channel}。注意：看板功能仍需先使用 /reminder set-board-channel 配置看板频道。`,
-        flags: 64,
-      });
-      return;
-    }
 
     if (subcommand === 'set-board-channel') {
       const channel = interaction.options.getChannel('channel', true);
-      setReminderBoardChannel(guildId, channel.id);
-      await interaction.reply({
-        content: `✅ reminder 看板频道已设置为 ${channel}`,
-        flags: 64,
-      });
+      await require('./control').configurePanel(interaction, channel.id, true);
+      return;
+    }
+  },
 
-      forceRefreshReminderBoard(guildId).catch(error =>
-        console.error('[reminder] set-board-channel 后刷新看板失败:', error.message)
-      );
+  async handleButton(interaction) {
+    if (!interaction.customId.startsWith('reminder_board_')) return;
+
+    if (interaction.customId === 'reminder_board_refresh') {
+      await interaction.deferReply({ flags: 64 });
+      try {
+        const refreshed = await forceRefreshReminderBoard(interaction.guildId);
+        await interaction.editReply(refreshed ? '✅ 已刷新 reminder 看板。' : 'ℹ️ 当前暂无可刷新内容，或看板频道不可用。');
+      } catch {
+        await interaction.editReply('❌ 刷新看板失败，请确认看板频道存在且 bot 有权限。');
+      }
       return;
     }
 
-    if (subcommand === 'set-role') {
-      const roleIds = [
-        interaction.options.getRole('role1'),
-        interaction.options.getRole('role2'),
-        interaction.options.getRole('role3'),
-        interaction.options.getRole('role4'),
-        interaction.options.getRole('role5'),
-      ].filter(Boolean).map(role => role.id);
+    if (interaction.customId === 'reminder_board_sync_daynight') {
+      await interaction.showModal(buildDayNightSyncModal());
+      return;
+    }
+  },
 
-      if (roleIds.length === 0) {
-        await interaction.reply({
-          content: '❌ 请至少选择 1 个提醒身分组。',
-          flags: 64,
-        });
+  async handleSelectMenu(interaction) {
+    if (interaction.customId === 'reminder_admin_menu') {
+      if (!canManageReminders(interaction)) {
+        await interaction.reply({ content: '❌ 只有管理员可以管理 reminder。', flags: 64 });
         return;
       }
 
-      setReminderRole(guildId, roleIds);
-      await interaction.reply({
-        content: `✅ reminder @ 身分组已设置为 ${roleIds.map(id => `<@&${id}>`).join(' ')}`,
-        flags: 64,
-      });
-      return;
-    }
+      const action = interaction.values[0];
 
-    if (subcommand === 'refresh-board') {
-      await interaction.deferReply({ flags: 64 });
-      try {
-        const config = getReminderConfig(guildId) || { boardChannelId: null };
-        if (!config.boardChannelId) {
-          await interaction.editReply('⚠️ 请先使用 `/reminder set-board-channel` 配置看板频道，再刷新。');
+      if (action === 'add') {
+        await openReminderAddModal(interaction);
+        return;
+      }
+
+      if (action === 'edit' || action === 'remove') {
+        const selectRow = buildReminderActionSelect(interaction.guildId, action);
+        if (!selectRow) {
+          await interaction.reply({ content: '当前还没有任何 reminder。', flags: 64 });
           return;
         }
 
-        const refreshed = await forceRefreshReminderBoard(guildId);
-        if (refreshed) {
-          await interaction.editReply('✅ 已立即刷新 reminder 倒计时看板。');
-        } else {
-          await interaction.editReply('ℹ️ 当前暂无可刷新内容，或看板频道不可用。');
-        }
-      } catch (error) {
-        await interaction.editReply('❌ 刷新看板失败。请确认已设置 /reminder set-board-channel，并检查 bot 权限。');
-      }
-      return;
-    }
-
-    if (subcommand === 'sync-daynight') {
-      const phase = interaction.options.getString('phase', true);
-      const rawTime = interaction.options.getString('time', true);
-      const parsed = parseSyncGameTimeInput(phase, rawTime);
-      if (!parsed.ok) {
         await interaction.reply({
-          content: parsed.error,
+          content: action === 'edit' ? '请选择要编辑的 reminder。' : '请选择要删除的 reminder。',
+          components: [selectRow],
           flags: 64,
         });
         return;
       }
 
-      const cycleSeconds = getCycleSecondsFromGameClock(parsed.hour24, parsed.minute);
-      setReminderDayNightSyncAnchor(guildId, Date.now() / 1000, cycleSeconds);
-
-      await interaction.reply({
-        content: [
-          '✅ 已按分段函数同步日夜看板。',
-          `- 输入：${parsed.displayTime}`,
-          `- 对应游戏时段：${getGamePeriodLabel(parsed.hour24)}`,
-          '- 你可以立刻执行 `/reminder refresh-board` 看最新倒计时。',
-        ].join('\n'),
-        flags: 64,
-      });
-
-      forceRefreshReminderBoard(guildId).catch(error =>
-        console.error('[reminder] sync-daynight 后刷新看板失败:', error.message)
-      );
-      return;
-    }
-
-    if (subcommand === 'list') {
-      const config = getReminderConfig(guildId) || {
-        channelId: null,
-        roleId: null,
-        roleIds: [],
-        timezone: DEFAULT_REMINDER_TIMEZONE,
-        reminders: [],
-      };
-
-      const reminderLines = config.reminders.length > 0
-        ? config.reminders.map(reminder => buildReminderLine(reminder)).join('\n')
-        : '当前还没有任何 reminder。';
-
-      const roleMentions = buildRoleMentionText(config.roleIds || []);
-      await interaction.reply({
-        content: [
-          '## Reminder 设置',
-          `- 频道：${config.channelId ? `<#${config.channelId}>` : '未设置'}`,
-          `- 身分组：${roleMentions || '未设置'}`,
-          `- 看板频道：${config.boardChannelId ? `<#${config.boardChannelId}>` : '未设置'}`,
-          '- 看板刷新：每 30 分钟（固定）',
-          '',
-          '## Reminder 列表',
-          reminderLines,
-        ].join('\n'),
-        flags: 64,
-      });
-      return;
-    }
-
-    if (subcommand === 'remove') {
-      const rawInput = interaction.options.getString('reminder', true);
-      const reminders = getGuildReminders(guildId);
-      const target = reminders.find(reminder => reminder.id === rawInput)
-        || reminders.find(reminder => reminder.normalizedName === normalizeReminderName(rawInput));
-
-      if (!target) {
+      if (action === 'set_channel') {
         await interaction.reply({
-          content: '❌ 找不到这个 reminder。请先用 /reminder list 确认名称。',
+          content: '请选择 reminder 要发送到的频道。',
+          components: [buildReminderChannelSelect()],
           flags: 64,
         });
         return;
       }
 
-      removeReminder(guildId, target.id);
-      await interaction.reply({
-        content: `✅ 已删除 reminder：**${target.name}**`,
-        flags: 64,
-      });
-
-      forceRefreshReminderBoard(guildId).catch(error =>
-        console.error('[reminder] remove 后刷新看板失败:', error.message)
-      );
-      return;
-    }
-
-    if (subcommand === 'edit') {
-      const rawInput = interaction.options.getString('name', true);
-      const reminders = getGuildReminders(guildId);
-      const target = reminders.find(reminder => reminder.id === rawInput)
-        || reminders.find(reminder => reminder.normalizedName === normalizeReminderName(rawInput));
-
-      if (!target) {
+      if (action === 'set_roles') {
         await interaction.reply({
-          content: '❌ 找不到这个 reminder。请先用 /reminder list 确认名称。',
+          content: '请选择 reminder 要 @ 的身分组。',
+          components: [buildReminderRoleSelect()],
           flags: 64,
         });
         return;
       }
+    }
 
-      const modal = new ModalBuilder()
-        .setCustomId(`reminder_edit_modal_${target.id}`)
-        .setTitle(`编辑提醒：${target.name}`);
+    if (!interaction.customId.startsWith('reminder_select_')) return;
 
-      const nameInput = new TextInputBuilder()
-        .setCustomId('reminder_name')
-        .setLabel('名称')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('示例：weekly-boss')
-        .setRequired(true)
-        .setValue(target.name)
-        .setMaxLength(80);
+    if (!canManageReminders(interaction)) {
+      await interaction.reply({ content: '❌ 只有管理员可以管理 reminder。', flags: 64 });
+      return;
+    }
 
-      const messageInput = new TextInputBuilder()
-        .setCustomId('reminder_message')
-        .setLabel('提醒内容')
-        .setStyle(TextInputStyle.Paragraph)
-        .setPlaceholder('示例：世界王 15 分钟后开始集合')
-        .setRequired(true)
-        .setValue(target.message)
-        .setMaxLength(1000);
+    const action = interaction.customId.replace('reminder_select_', '');
+    const reminderId = interaction.values[0];
+    const target = findReminderByInput(interaction.guildId, reminderId);
 
-      const frequencyInput = new TextInputBuilder()
-        .setCustomId('reminder_schedule_rule')
-        .setLabel('频率')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('例：每天除周六 / 每周一三五 / 每两周周三')
-        .setRequired(true)
-        .setValue(buildReminderRuleText(target))
-        .setMaxLength(40);
+    if (!target) {
+      await interaction.update({ content: '❌ 找不到这个 reminder，可能已经被删除。', components: [] });
+      return;
+    }
 
-      const sendTimeInput = new TextInputBuilder()
-        .setCustomId('reminder_send_time')
-        .setLabel('提醒发出时间（24小时制）')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('格式 HH:MM TZ，例 20:30 CDT')
-        .setRequired(true)
-        .setValue(buildSendTimeInputValue(target))
-        .setMaxLength(40);
+    if (action === 'edit') {
+      await interaction.showModal(buildReminderEditModal(target));
+      return;
+    }
 
-      const activePeriodInput = new TextInputBuilder()
-        .setCustomId('reminder_activity_period')
-        .setLabel('活动时间（选填）')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('格式 MM.DD.YYYY-MM.DD.YYYY [TZ]')
-        .setRequired(false)
-        .setValue(
-          target.activeStartDate && target.activeEndDate
-            ? `${toDotDate(target.activeStartDate)}-${toDotDate(target.activeEndDate)}`
-            : ''
-        )
-        .setMaxLength(80);
-
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(nameInput),
-        new ActionRowBuilder().addComponents(messageInput),
-        new ActionRowBuilder().addComponents(frequencyInput),
-        new ActionRowBuilder().addComponents(sendTimeInput),
-        new ActionRowBuilder().addComponents(activePeriodInput),
+    if (action === 'remove') {
+      removeReminder(interaction.guildId, target.id);
+      await interaction.update({ content: `✅ 已删除 reminder：**${target.name}**`, components: [] });
+      forceRefreshReminderBoard(interaction.guildId).catch(error =>
+        console.error('[reminder] board remove 后刷新看板失败:', error.message)
       );
+    }
+  },
 
-      await interaction.showModal(modal);
+  async handleChannelSelect(interaction) {
+    if (interaction.customId !== 'reminder_channel_select') return;
+
+    if (!canManageReminders(interaction)) {
+      await interaction.reply({ content: '❌ 只有管理员可以管理 reminder。', flags: 64 });
       return;
     }
 
-    if (subcommand !== 'add') {
-      return;
-    }
-
-    const config = getReminderConfig(guildId) || {
-      channelId: null,
-      roleId: null,
-      roleIds: [],
-      timezone: DEFAULT_REMINDER_TIMEZONE,
-      reminders: [],
-    };
-
-    if (!config.boardChannelId) {
-      await interaction.reply({
-        content: '❌ 请先使用 /reminder set-board-channel 设置看板频道。',
-        flags: 64,
-      });
-      return;
-    }
-
-    if (!config.channelId) {
-      await interaction.reply({
-        content: '❌ 请先使用 /reminder set-channel 设置提醒频道。',
-        flags: 64,
-      });
-      return;
-    }
-
-    if (!Array.isArray(config.roleIds) || config.roleIds.length === 0) {
-      await interaction.reply({
-        content: '❌ 请先使用 /reminder set-role 设置提醒身分组。',
-        flags: 64,
-      });
-      return;
-    }
-
-    const modal = new ModalBuilder()
-      .setCustomId('reminder_add_modal')
-      .setTitle('新增定时提醒');
-
-    const nameInput = new TextInputBuilder()
-      .setCustomId('reminder_name')
-      .setLabel('名称')
-      .setStyle(TextInputStyle.Short)
-      .setPlaceholder('示例：weekly-boss')
-      .setRequired(true)
-      .setMaxLength(80);
-
-    const messageInput = new TextInputBuilder()
-      .setCustomId('reminder_message')
-      .setLabel('提醒内容')
-      .setStyle(TextInputStyle.Paragraph)
-      .setPlaceholder('示例：世界王 15 分钟后开始集合')
-      .setRequired(true)
-      .setMaxLength(1000);
-
-    const frequencyInput = new TextInputBuilder()
-      .setCustomId('reminder_schedule_rule')
-      .setLabel('频率')
-      .setStyle(TextInputStyle.Short)
-      .setPlaceholder('例：每天除周六 / 每周一三五 / 每两周周三')
-      .setRequired(true)
-      .setMaxLength(40);
-
-    const sendTimeInput = new TextInputBuilder()
-      .setCustomId('reminder_send_time')
-      .setLabel('提醒发出时间（24小时制）')
-      .setStyle(TextInputStyle.Short)
-      .setPlaceholder('格式 HH:MM TZ，例 20:30 CDT')
-      .setRequired(true)
-      .setMaxLength(40);
-
-    const activePeriodInput = new TextInputBuilder()
-      .setCustomId('reminder_activity_period')
-      .setLabel('活动时间（选填）')
-      .setStyle(TextInputStyle.Short)
-      .setPlaceholder('格式 MM.DD.YYYY-MM.DD.YYYY [TZ]')
-      .setRequired(false)
-      .setMaxLength(80);
-
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(nameInput),
-      new ActionRowBuilder().addComponents(messageInput),
-      new ActionRowBuilder().addComponents(frequencyInput),
-      new ActionRowBuilder().addComponents(sendTimeInput),
-      new ActionRowBuilder().addComponents(activePeriodInput),
+    const channelId = interaction.values[0];
+    setReminderChannel(interaction.guildId, channelId);
+    await interaction.update({ content: `✅ reminder 发送频道已设置为 <#${channelId}>。`, components: [] });
+    forceRefreshReminderBoard(interaction.guildId).catch(error =>
+      console.error('[reminder] board set-channel 后刷新看板失败:', error.message)
     );
+  },
 
-    await interaction.showModal(modal);
+  async handleRoleSelect(interaction) {
+    if (interaction.customId !== 'reminder_role_select') return;
+
+    if (!canManageReminders(interaction)) {
+      await interaction.reply({ content: '❌ 只有管理员可以管理 reminder。', flags: 64 });
+      return;
+    }
+
+    const roleIds = interaction.values;
+    setReminderRole(interaction.guildId, roleIds);
+    await interaction.update({
+      content: `✅ reminder @ 身分组已设置为 ${roleIds.map(id => `<@&${id}>`).join(' ')}`,
+      components: [],
+    });
+    forceRefreshReminderBoard(interaction.guildId).catch(error =>
+      console.error('[reminder] board set-role 后刷新看板失败:', error.message)
+    );
   },
 
   async handleModalSubmit(interaction) {
     const isAdd = interaction.customId === 'reminder_add_modal';
     const isEdit = interaction.customId.startsWith('reminder_edit_modal_');
-    if (!isAdd && !isEdit) {
+    const isDayNight = interaction.customId === 'reminder_daynight_modal';
+    if (!isAdd && !isEdit && !isDayNight) {
+      return;
+    }
+
+    if (isDayNight) {
+      const phase = interaction.fields.getTextInputValue('reminder_daynight_phase').trim();
+      const rawTime = interaction.fields.getTextInputValue('reminder_daynight_time').trim();
+      const parsed = parseSyncGameTimeInput(phase, rawTime);
+      if (!parsed.ok) {
+        await interaction.reply({ content: parsed.error, flags: 64 });
+        return;
+      }
+
+      const cycleSeconds = getCycleSecondsFromGameClock(parsed.hour24, parsed.minute);
+      setReminderDayNightSyncAnchor(interaction.guildId, Date.now() / 1000, cycleSeconds);
+      await interaction.reply({
+        content: [
+          '✅ 已同步日夜看板。',
+          `- 输入：${parsed.displayTime}`,
+          `- 对应游戏时段：${getGamePeriodLabel(parsed.hour24)}`,
+        ].join('\n'),
+        flags: 64,
+      });
+
+      forceRefreshReminderBoard(interaction.guildId).catch(error =>
+        console.error('[reminder] board sync-daynight 后刷新看板失败:', error.message)
+      );
+      return;
+    }
+
+    if (!canManageReminders(interaction)) {
+      await interaction.reply({ content: '❌ 只有管理员可以管理 reminder。', flags: 64 });
       return;
     }
 
@@ -1137,17 +1085,9 @@ module.exports = {
       reminders: [],
     };
 
-    if (!config.boardChannelId) {
-      await interaction.reply({
-        content: '❌ 请先使用 /reminder set-board-channel 设置看板频道。',
-        flags: 64,
-      });
-      return;
-    }
-
     if (!config.channelId) {
       await interaction.reply({
-        content: '❌ 请先使用 /reminder set-channel 设置提醒频道。',
+        content: '❌ 请先在 reminder 看板的管理员菜单里设置提醒频道。',
         flags: 64,
       });
       return;
@@ -1155,7 +1095,7 @@ module.exports = {
 
     if (!Array.isArray(config.roleIds) || config.roleIds.length === 0) {
       await interaction.reply({
-        content: '❌ 请先使用 /reminder set-role 设置提醒身分组。',
+        content: '❌ 请先在 reminder 看板的管理员菜单里设置提醒身分组。',
         flags: 64,
       });
       return;
@@ -1203,5 +1143,10 @@ module.exports = {
     parseReminderRuleInput,
     buildReminderRuleText,
     buildFrequencyLabel,
+    buildReminderAddModal,
+    buildReminderEditModal,
+    buildDayNightSyncModal,
+    buildReminderChannelSelect,
+    buildReminderRoleSelect,
   },
 };

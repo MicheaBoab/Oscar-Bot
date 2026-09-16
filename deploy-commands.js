@@ -1,18 +1,7 @@
-const fs = require('fs');
-const path = require('path');
 const { REST, Routes } = require('discord.js');
 require("dotenv").config();
 
-const commands = [];
-const commandsPath = path.join(__dirname, 'commands');
-const commandFiles = fs
-  .readdirSync(commandsPath)
-  .filter(file => file.endsWith('.js'));
-
-for (const file of commandFiles) {
-  const command = require(path.join(commandsPath, file));
-  commands.push(command.data.toJSON());
-}
+const commands = require('./helper/slashCommands').loadCommands().map(command => command.data.toJSON());
 
 const CLIENT_ID_TOKEN = process.env.CLIENT_ID;
 const GUILD_ID_TOKEN = process.env.GUILD_ID;
@@ -32,8 +21,14 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
       { body: commands },
     );
 
-    console.log('✅ Slash Commands 注册完成');
+    const registered = await rest.get(Routes.applicationGuildCommands(CLIENT_ID_TOKEN, GUILD_ID_TOKEN));
+    const names = registered.map(command => command.name).sort();
+    if (JSON.stringify(names) !== JSON.stringify(commands.map(command => command.name).sort())) {
+      throw new Error('注册后的命令列表与预期不一致');
+    }
+    console.log('✅ Slash Commands 已核实：' + names.join(', '));
   } catch (error) {
     console.error(error);
+    process.exitCode = 1;
   }
 })();

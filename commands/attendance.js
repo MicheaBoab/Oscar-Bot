@@ -6,23 +6,56 @@ const {
   ButtonBuilder,
   ButtonStyle,
   StringSelectMenuBuilder,
-  ChannelSelectMenuBuilder,
   ChannelType,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
 } = require('discord.js');
 const {
-  createAttendance,
   loadAllAttendances,
   loadAttendance,
   updateAttendance,
   archiveAttendance,
-  attendanceExistsByTitle,
   findAttendanceByMessage,
   findAttendanceByGroupPanelMessage,
 } = require('../storage/attendanceStore');
-const { getGroupChannelId, setGroupChannelId } = require('../storage/attendanceSettingsStore');
+const { getGroupChannelId } = require('../storage/attendanceSettingsStore');
+const { withPanelLock } = require('../helper/fixedPanel');
+
+function groupSetupHint(interaction) {
+  return privateText(interaction,
+    '请先前往 中控台 → 活动报名 → 设置分队面板频道，设置有效的频道。',
+    'Set a valid channel in Control Panel → Attendance → Set group panel channel first.');
+}
+
+async function openAttendanceGroup(interaction, title) {
+  return withPanelLock(`attendance:event:${title}`, async () => {
+    const attendance = loadAttendance(title);
+    if (!attendance || attendance.status !== 'active' || attendance.guildId !== interaction.guildId) {
+      await interaction.editReply({ content: privateText(interaction, '报名帖已结束或不存在。', 'Signup has ended or no longer exists.') });
+      return;
+    }
+    let existing;
+    try { existing = await getExistingGroupPanelMessage(interaction.client, attendance); }
+    catch (error) {
+      console.error('[attendance] 无法读取已有分队面板:', error.message);
+      await interaction.editReply({ content: privateText(interaction, '无法读取已有分队面板，请检查权限后重试。', 'Cannot read the existing team panel. Check permissions and retry.') });
+      return;
+    }
+    if (existing) {
+      await interaction.editReply({ content: privateText(interaction, '请前往已有分队面板继续操作。', 'Continue in the existing team panel.'),
+        components: [buildExistingGroupPanelRow(interaction.guildId, attendance)] });
+      return;
+    }
+    const channel = await getWritableGroupChannel(interaction.guild, getGroupChannelId(interaction.guildId));
+    if (!channel) {
+      await interaction.editReply({ content: groupSetupHint(interaction), components: [] });
+      return;
+    }
+    await sendGroupPanelToChannel(interaction.client, title, attendance, channel, interaction.guild);
+    await interaction.editReply({ content: privateText(interaction, `✅ 分队面板已发送到 <#${channel.id}>。`, `✅ Group panel sent to <#${channel.id}>.`), components: [] });
+  });
+}
 
 const GROUP_SELECT_MAX_VALUES = 25;
 const MAX_ATTENDANCE_GROUPS = 24;
@@ -233,10 +266,9 @@ function buildAdminMenuRow() {
   return new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId('attendance_admin_menu')
-      .setPlaceholder(bilingual('⚙️ 管理员操作', '⚙️ Admin actions'))
+      .setPlaceholder(bilingual('⚙️ 活动管理', '⚙️ Event actions'))
       .addOptions(
         { label: bilingual('🧩 分队管理', '🧩 Manage teams'), value: 'group_open' },
-        { label: bilingual('📍 更新分组频道', '📍 Set team channel'), value: 'group_channel_change' },
         { label: bilingual('🔄 刷新玩家名称', '🔄 Refresh names'), value: 'refresh_names' },
         { label: bilingual('🔒 关闭此报名', '🔒 Close signup'), value: 'close_signup' },
       ),
@@ -470,31 +502,15 @@ async function deleteGroupPanel(interaction, title, attendance) {
   });
 }
 
-async function removeExistingGroupPanel(client, attendance) {
-  const channelId = attendance.groupPanelChannelId;
-  const messageId = attendance.groupPanelMessageId;
-  attendance.groupPanelChannelId = null;
-  attendance.groupPanelMessageId = null;
-  if (!channelId || !messageId) return;
-
-  try {
-    const channel = await client.channels.fetch(channelId);
-    if (!channel || !channel.isTextBased()) return;
-    const message = await channel.messages.fetch(messageId);
-    await message.delete();
-  } catch (error) {
-    console.warn('[attendance] 旧分队面板已不存在或无法删除:', error.message);
-  }
-}
-
 async function getExistingGroupPanelMessage(client, attendance) {
   if (!attendance.groupPanelChannelId || !attendance.groupPanelMessageId) return null;
   try {
     const channel = await client.channels.fetch(attendance.groupPanelChannelId);
     if (!channel || !channel.isTextBased()) return null;
     return await channel.messages.fetch(attendance.groupPanelMessageId);
-  } catch {
-    return null;
+  } catch (error) {
+    if (error.code === 10008 || error.code === 10003) return null;
+    throw error;
   }
 }
 
@@ -504,17 +520,6 @@ function buildExistingGroupPanelRow(guildId, attendance) {
       .setLabel(bilingual('➡️ 前往分队面板', '➡️ Open team panel'))
       .setStyle(ButtonStyle.Link)
       .setURL(`https://discord.com/channels/${guildId}/${attendance.groupPanelChannelId}/${attendance.groupPanelMessageId}`),
-  );
-}
-
-function buildGroupChannelSelector(originalMessageId, mode) {
-  return new ActionRowBuilder().addComponents(
-    new ChannelSelectMenuBuilder()
-      .setCustomId(`attendance_group_channel_select:${originalMessageId}:${mode}`)
-      .setPlaceholder(bilingual('选择分队面板发送频道', 'Select team panel channel'))
-      .setMinValues(1)
-      .setMaxValues(1)
-      .addChannelTypes(ChannelType.GuildText),
   );
 }
 
@@ -532,15 +537,22 @@ async function getWritableGroupChannel(guild, channelId) {
 }
 
 async function sendGroupPanelToChannel(client, title, attendance, channel, guild) {
-  await removeExistingGroupPanel(client, attendance);
-  updateAttendance(title, attendance);
   const panelMessage = await channel.send({
     embeds: [buildGroupPanelEmbed(attendance, guild)],
     components: buildGroupPanelComponents(attendance),
+    allowedMentions: { parse: [] },
   });
-  attendance.groupPanelMessageId = panelMessage.id;
-  attendance.groupPanelChannelId = panelMessage.channelId;
-  updateAttendance(title, attendance);
+  try {
+    // Preserve participant changes that may have arrived while the message was being sent.
+    const latest = loadAttendance(title);
+    if (!latest || latest.status !== 'active') throw new Error('Signup has ended.');
+    latest.groupPanelMessageId = panelMessage.id;
+    latest.groupPanelChannelId = channel.id;
+    updateAttendance(title, latest);
+  } catch (error) {
+    await panelMessage.delete().catch(() => {});
+    throw error;
+  }
 }
 
 async function refreshGroupPanelMessage(client, attendance) {
@@ -694,73 +706,23 @@ module.exports = {
       }
 
       await interaction.deferReply({ flags: 64 });
-      const existingPanel = await getExistingGroupPanelMessage(interaction.client, attendance);
-      if (existingPanel) {
-        await interaction.editReply({
-          content: privateText(interaction, '⚠️ 该活动已经有一个分队面板，请前往现有面板继续操作。', '⚠️ This signup already has a group panel. Please use the existing panel.'),
-          components: [buildExistingGroupPanelRow(interaction.guildId, attendance)],
-        });
-        return;
-      }
-      if (attendance.groupPanelMessageId || attendance.groupPanelChannelId) {
-        attendance.groupPanelMessageId = null;
-        attendance.groupPanelChannelId = null;
-        updateAttendance(title, attendance);
-      }
-
-      const savedChannelId = getGroupChannelId(interaction.guildId);
-      const targetChannel = await getWritableGroupChannel(interaction.guild, savedChannelId);
-      if (!targetChannel) {
-        await interaction.editReply({
-          content: savedChannelId
-            ? privateText(interaction, '原分组频道已不存在或机器人没有发送权限，请重新选择：', 'The saved group channel no longer exists or the bot cannot send there. Please choose again:')
-            : privateText(interaction, '首次使用分队管理，请选择分队面板发送频道：', 'Choose a channel for the group panel:'),
-          components: [buildGroupChannelSelector(attendance.messageId, 'open')],
-        });
-        return;
-      }
-
-      await sendGroupPanelToChannel(interaction.client, title, attendance, targetChannel, interaction.guild);
-      await interaction.editReply({ content: privateText(interaction, `✅ 分队面板已发送到 <#${targetChannel.id}>。`, `✅ Group panel sent to <#${targetChannel.id}>.`) });
+      await openAttendanceGroup(interaction, title);
       return;
     }
 
     if (subcommand === 'create') {
-      const title = interaction.options.getString('title', true).trim();
-      const description = (interaction.options.getString('description', false) || '').trim();
-      const selectRole = interaction.options.getBoolean('select_role', true);
-
-      if (attendanceExistsByTitle(title)) {
-        await interaction.reply({
-          content: privateText(interaction, `❌ 已经存在名为 **${title}** 的报名帖`, `❌ A signup named **${title}** already exists.`),
-          flags: 64,
+      await interaction.deferReply({ flags: 64 });
+      try {
+        const attendance = await require('../helper/attendancePublishing').publishAttendance(interaction, {
+          channelId: interaction.channelId,
+          title: interaction.options.getString('title', true),
+          description: interaction.options.getString('description', false) || '',
+          selectRole: interaction.options.getBoolean('select_role', true),
         });
-        return;
+        await interaction.editReply({ content: privateText(interaction, '✅ 已创建报名帖：', '✅ Signup created: ') + 'https://discord.com/channels/' + attendance.guildId + '/' + attendance.channelId + '/' + attendance.messageId });
+      } catch (error) {
+        await interaction.editReply({ content: error.message, allowedMentions: { parse: [] } });
       }
-
-      const attendance = {
-        title,
-        description,
-        participants: {},
-        selectRole,
-        status: 'active',
-        time: Date.now(),
-        createdByUserId: interaction.user.id,
-      };
-
-      createAttendance(title, attendance);
-
-      const reply = await interaction.reply({
-        embeds: [buildAttendanceEmbed(attendance, { guild: interaction.guild })],
-        components: buildAttendanceComponents(attendance, interaction.guild),
-      });
-
-      const replyMessage = await interaction.fetchReply();
-      attendance.messageId = replyMessage.id;
-      attendance.channelId = replyMessage.channelId;
-      attendance.guildId = interaction.guildId;
-      updateAttendance(title, attendance);
-
       return;
     }
 
@@ -1087,13 +1049,13 @@ module.exports = {
       return;
     }
 
-    if (!isAdminInteraction(interaction)) {
-      await interaction.reply({ content: privateText(interaction, '❌ 该操作仅管理员可用。', '❌ This action is available to admins only.'), flags: 64 });
-      return;
-    }
-
     const { title, attendance } = match;
     const action = interaction.values[0];
+    if (attendance.guildId !== interaction.guildId ||
+        (!isAdminInteraction(interaction) && !(action === 'close_signup' && attendance.createdByUserId === interaction.user.id))) {
+      await interaction.reply({ content: privateText(interaction, '无权执行此操作。', 'You cannot perform this action.'), flags: 64 });
+      return;
+    }
 
     if (action === 'refresh_names') {
       await interaction.deferUpdate();
@@ -1119,48 +1081,14 @@ module.exports = {
     }
 
     if (action === 'group_channel_change') {
-      await interaction.reply({
-        content: privateText(interaction, '请选择以后用于发送临时分队面板的频道：', 'Choose the channel for future temporary group panels:'),
-        components: [buildGroupChannelSelector(interaction.message.id, 'change')],
-        flags: 64,
-      });
-      await resetAdminMenuSelection(interaction, attendance);
+      await interaction.reply({ content: groupSetupHint(interaction), flags: 64 });
       return;
     }
 
     if (action === 'group_open') {
       await interaction.deferReply({ flags: 64 });
-      const existingPanel = await getExistingGroupPanelMessage(interaction.client, attendance);
-      if (existingPanel) {
-        await interaction.editReply({
-          content: privateText(interaction, '⚠️ 该活动已经有一个分队面板，请前往现有面板继续操作。', '⚠️ This signup already has a group panel. Please use the existing panel.'),
-          components: [buildExistingGroupPanelRow(interaction.guildId, attendance)],
-        });
-        await resetAdminMenuSelection(interaction, attendance);
-        return;
-      }
-      if (attendance.groupPanelMessageId || attendance.groupPanelChannelId) {
-        attendance.groupPanelMessageId = null;
-        attendance.groupPanelChannelId = null;
-        updateAttendance(title, attendance);
-      }
-
-      const savedChannelId = getGroupChannelId(interaction.guildId);
-      const targetChannel = await getWritableGroupChannel(interaction.guild, savedChannelId);
-      if (!targetChannel) {
-        await interaction.editReply({
-          content: savedChannelId
-            ? privateText(interaction, '原分组频道已不存在或机器人没有发送权限，请重新选择：', 'The saved group channel no longer exists or the bot cannot send there. Please choose again:')
-            : privateText(interaction, '首次使用分队管理，请选择分队面板发送频道：', 'Choose a channel for the group panel:'),
-          components: [buildGroupChannelSelector(interaction.message.id, 'open')],
-        });
-        await resetAdminMenuSelection(interaction, attendance);
-        return;
-      }
-
-      await sendGroupPanelToChannel(interaction.client, title, attendance, targetChannel, interaction.guild);
+      await openAttendanceGroup(interaction, title);
       await resetAdminMenuSelection(interaction, attendance);
-      await interaction.editReply({ content: privateText(interaction, `✅ 分队面板已发送到 <#${targetChannel.id}>。`, `✅ Group panel sent to <#${targetChannel.id}>.`) });
       return;
     }
 
@@ -1185,84 +1113,31 @@ module.exports = {
   },
 
   async handleGroupChannelSelect(interaction) {
-    if (!isAdminInteraction(interaction)) {
-      await interaction.update({ content: privateText(interaction, '❌ 仅管理员可以设置分组频道。', '❌ Only admins can set the group channel.'), components: [] });
-      return;
-    }
-
-    const [, originalMessageId, mode] = interaction.customId.split(':');
-    const match = findAttendanceByMessage(originalMessageId);
-    if (!match || match.attendance.status !== 'active') {
-      await interaction.update({ content: privateText(interaction, '❌ 该报名帖已结束或不存在。', '❌ This signup has ended or no longer exists.'), components: [] });
-      return;
-    }
-
-    await interaction.deferUpdate();
-    const targetChannel = await getWritableGroupChannel(interaction.guild, interaction.values[0]);
-    if (!targetChannel) {
-      await interaction.editReply({
-        content: privateText(interaction, '❌ 机器人无法在该频道发送分队面板，请选择允许机器人查看、发言和嵌入链接的文字频道。', '❌ The bot cannot send a group panel there. Choose a text channel where it can view, send messages, and embed links.'),
-        components: [buildGroupChannelSelector(originalMessageId, mode)],
-      });
-      return;
-    }
-
-    setGroupChannelId(interaction.guildId, targetChannel.id);
-    if (mode === 'change') {
-      await interaction.editReply({ content: privateText(interaction, `✅ 默认分组频道已更新为 <#${targetChannel.id}>。`, `✅ Default group channel updated to <#${targetChannel.id}>.`), components: [] });
-      return;
-    }
-
-    const latestMatch = findAttendanceByMessage(originalMessageId);
-    if (!latestMatch || latestMatch.attendance.status !== 'active') {
-      await interaction.editReply({ content: privateText(interaction, '❌ 该报名帖已结束或不存在。', '❌ This signup has ended or no longer exists.'), components: [] });
-      return;
-    }
-
-    const { title, attendance } = latestMatch;
-    const existingPanel = await getExistingGroupPanelMessage(interaction.client, attendance);
-    if (existingPanel) {
-      await interaction.editReply({
-        content: privateText(interaction, '⚠️ 该活动已经有一个分队面板，请前往现有面板继续操作。', '⚠️ This signup already has a group panel. Please use the existing panel.'),
-        components: [buildExistingGroupPanelRow(interaction.guildId, attendance)],
-      });
-      return;
-    }
-    if (attendance.groupPanelMessageId || attendance.groupPanelChannelId) {
-      attendance.groupPanelMessageId = null;
-      attendance.groupPanelChannelId = null;
-      updateAttendance(title, attendance);
-    }
-
-    await sendGroupPanelToChannel(interaction.client, title, attendance, targetChannel, interaction.guild);
-    try {
-      const signupChannel = await interaction.client.channels.fetch(attendance.channelId);
-      const signupMessage = await signupChannel.messages.fetch(attendance.messageId);
-      await signupMessage.edit({ components: buildAttendanceComponents(attendance, interaction.guild) });
-    } catch (error) {
-      console.error('[attendance] 重置管理员菜单失败:', error.message);
-    }
-    await interaction.editReply({ content: privateText(interaction, `✅ 分队面板已发送到 <#${targetChannel.id}>。`, `✅ Group panel sent to <#${targetChannel.id}>.`), components: [] });
+    await interaction.update({ content: groupSetupHint(interaction), components: [] });
   },
 
   async handleAttendanceCloseConfirm(interaction) {
-    if (!isAdminInteraction(interaction)) {
-      await interaction.update({ content: privateText(interaction, '❌ 该操作仅管理员可用。', '❌ This action is available to admins only.'), components: [] });
-      return;
-    }
-
+    await interaction.deferUpdate();
     const originalMessageId = interaction.customId.split(':')[1];
     const match = findAttendanceByMessage(originalMessageId);
-
     if (!match) {
-      await interaction.update({ content: privateText(interaction, '❌ 该报名帖已结束或不存在。', '❌ This signup has ended or no longer exists.'), components: [] });
+      await interaction.editReply({ content: privateText(interaction, '报名帖已结束或不存在。', 'Signup has ended or no longer exists.'), components: [] });
       return;
     }
-
-    const { title, attendance } = match;
-    await closeAttendance(interaction.client, title, attendance);
-
-    await interaction.update({ content: privateText(interaction, `✅ 已关闭「${attendance.title}」的报名帖。`, `✅ Signup "${attendance.title}" has been closed.`), components: [] });
+    await withPanelLock('attendance:event:' + match.title, async () => {
+      const current = findAttendanceByMessage(originalMessageId);
+      if (!current || current.attendance.status !== 'active') {
+        await interaction.editReply({ content: privateText(interaction, '报名帖已结束或不存在。', 'Signup has ended or no longer exists.'), components: [] });
+        return;
+      }
+      const { title, attendance } = current;
+      if (attendance.guildId !== interaction.guildId || (!isAdminInteraction(interaction) && attendance.createdByUserId !== interaction.user.id)) {
+        await interaction.editReply({ content: privateText(interaction, '只有创建者或管理员可以关闭报名帖。', 'Only the creator or an admin can close this signup.'), components: [] });
+        return;
+      }
+      await closeAttendance(interaction.client, title, attendance);
+      await interaction.editReply({ content: privateText(interaction, '✅ 报名帖已关闭。', '✅ Signup closed.'), components: [] });
+    });
   },
 
   async handleAttendanceCloseCancel(interaction) {

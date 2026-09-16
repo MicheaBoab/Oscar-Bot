@@ -1,8 +1,15 @@
-const { EmbedBuilder } = require('discord.js');
+const {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder,
+  StringSelectMenuBuilder,
+} = require('discord.js');
 const {
   getAllReminderConfigs,
   updateReminderLastTriggered,
-  updateReminderBoardMessageId,
+  getReminderConfig,
+  saveReminderBoardLocation,
 } = require('../storage/reminderStore');
 const {
   buildReminderSlotKey,
@@ -16,6 +23,7 @@ const {
 } = require('./reminderUtils');
 
 const CHECK_INTERVAL_MS = 30 * 1000;
+const { withPanelLock, publishFixedPanel } = require('./fixedPanel');
 const BOARD_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
 const BD_DAY_SECONDS = 3 * 60 * 60 + 20 * 60;
 const BD_NIGHT_SECONDS = 40 * 60;
@@ -176,7 +184,7 @@ async function processGuildReminders(client, guildId, config) {
           ? `\n📅 活动时间：<t:${eventUnix}:F> - <t:${endUnix}:t>（<t:${eventUnix}:R>）`
           : `\n📅 活动时间：<t:${eventUnix}:F>（<t:${eventUnix}:R>）`
         : '';
-      const kindLabel = trigger.kind === 'pre-10m'
+      const kindLabel = trigger.kind === ADVANCE_REMINDER_KIND
         ? '\n🕒 提前 10 分钟提醒'
         : '';
 
@@ -226,7 +234,7 @@ function buildBoardEmbed(guildId, config, nowUnix) {
   ];
 
   if (entries.length === 0) {
-    descriptionLines.push('当前没有可计算的未来提醒。请先使用 `/reminder add` 新增条目。');
+    descriptionLines.push('当前没有可计算的未来提醒。请使用下方管理员菜单新增条目。');
   } else {
     for (let i = 0; i < entries.length; i += 1) {
       const { reminder, nextUnix } = entries[i];
@@ -244,55 +252,65 @@ function buildBoardEmbed(guildId, config, nowUnix) {
     .setDescription(descriptionLines.join('\n'));
 }
 
+function buildBoardComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('reminder_board_refresh')
+        .setLabel('刷新看板')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('reminder_board_sync_daynight')
+        .setLabel('同步日夜')
+        .setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('reminder_admin_menu')
+        .setPlaceholder('⚙️ 管理员操作（新增 / 编辑 / 设置）')
+        .addOptions(
+          { label: '新增提醒', value: 'add' },
+          { label: '编辑提醒', value: 'edit' },
+          { label: '删除提醒', value: 'remove' },
+          { label: '设置提醒频道', value: 'set_channel' },
+          { label: '设置@身分组', value: 'set_roles' },
+        ),
+    ),
+  ];
+}
+
 async function refreshReminderBoardForGuild(client, guildId, config, options = {}) {
-  const forceRefresh = options.forceRefresh === true;
-  const boardChannelId = config.boardChannelId || null;
-  if (!boardChannelId) return false;
-  if (!shouldRefreshBoard(guildId, config, forceRefresh)) return false;
-
-  let channel;
-  try {
-    channel = await client.channels.fetch(boardChannelId);
-  } catch {
-    console.error(`[reminder] guild ${guildId} 无法获取看板频道 ${boardChannelId}`);
-    return false;
-  }
-
-  if (!channel || typeof channel.send !== 'function') {
-    console.error(`[reminder] guild ${guildId} 看板频道 ${config.boardChannelId} 不可发送消息`);
-    return false;
-  }
-
-  const nowUnix = Math.floor(Date.now() / 1000);
-  const embed = buildBoardEmbed(guildId, config, nowUnix);
-  const payload = {
-    content: '🧭 固定时间提醒看板（自动刷新）',
-    embeds: [embed],
-    allowedMentions: { parse: [] },
-  };
-
-  let sentMessage = null;
-  if (config.boardMessageId) {
+  return withPanelLock(`reminder:${guildId}`, async () => {
+    const current = getReminderConfig(guildId);
+    if (!current?.boardChannelId || !shouldRefreshBoard(guildId, current, options.forceRefresh === true)) return false;
     try {
-      const oldMessage = await channel.messages.fetch(config.boardMessageId);
-      sentMessage = await oldMessage.edit(payload);
-    } catch {
-      sentMessage = null;
-    }
-  }
-
-  if (!sentMessage) {
-    try {
-      sentMessage = await channel.send(payload);
+      await publishReminderBoard(client, guildId, current.boardChannelId, current);
+      return true;
     } catch (error) {
-      console.error(`[reminder] guild ${guildId} 发送看板失败:`, error.message);
+      console.error('[reminder] 刷新看板失败:', error.message);
       return false;
     }
-  }
+  });
+}
 
-  updateReminderBoardMessageId(guildId, sentMessage.id);
+async function setReminderBoardLocation(client, guildId, channelId) {
+  return withPanelLock(`reminder:${guildId}`, () =>
+    publishReminderBoard(client, guildId, channelId, getReminderConfig(guildId) || {}));
+}
+
+async function publishReminderBoard(client, guildId, channelId, config) {
+  const result = await publishFixedPanel({
+    client, guildId, channelId,
+    previous: { channelId: config.boardChannelId, messageId: config.boardMessageId },
+    payload: {
+      content: '🧭 固定时间提醒看板（自动刷新）',
+      embeds: [buildBoardEmbed(guildId, config, Math.floor(Date.now() / 1000))],
+      components: buildBoardComponents(), allowedMentions: { parse: [] },
+    },
+    save: location => saveReminderBoardLocation(guildId, location),
+  });
   boardLastUpdatedAt.set(guildId, Date.now());
-  return true;
+  return result;
 }
 
 async function runReminderScan(client) {
@@ -338,10 +356,12 @@ async function forceRefreshReminderBoard(guildId) {
 }
 
 module.exports = {
+  setReminderBoardLocation,
   startReminderScheduler,
   runReminderScan,
   getTriggeredSlot,
   getTriggeredSlots,
+  buildBoardComponents,
   forceRefreshReminderBoard,
   refreshReminderBoardForGuild,
 };

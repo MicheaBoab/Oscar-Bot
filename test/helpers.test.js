@@ -20,7 +20,8 @@ const {
   getReminderWeekdays,
   computeNextReminderOccurrenceUnix,
 } = require('../helper/reminderUtils');
-const { getTriggeredSlots } = require('../helper/reminderScheduler');
+const { buildBoardComponents, getTriggeredSlots } = require('../helper/reminderScheduler');
+const controlCommand = require('../commands/control');
 const reminderCommand = require('../commands/reminder');
 
 test('parseDurationInput handles defaults, aliases, and invalid input', () => {
@@ -165,5 +166,49 @@ test('reminderScheduler triggers advance reminders from the scanned minute', () 
         unix: Date.UTC(2026, 8, 17, 20, 20, 0) / 1000,
       },
     ],
+  );
+});
+
+test('reminder board exposes management controls and reuses modal ids', () => {
+  const components = buildBoardComponents().map(row => row.toJSON());
+  const customIds = components.flatMap(row => row.components.map(component => component.custom_id));
+  assert.deepEqual(customIds, [
+    'reminder_board_refresh',
+    'reminder_board_sync_daynight',
+    'reminder_admin_menu',
+  ]);
+  assert.deepEqual(components[1].components[0].options.map(option => option.value), [
+    'add',
+    'edit',
+    'remove',
+    'set_channel',
+    'set_roles',
+  ]);
+  assert.equal(reminderCommand._private.buildReminderAddModal().toJSON().custom_id, 'reminder_add_modal');
+  assert.equal(reminderCommand._private.buildDayNightSyncModal().toJSON().custom_id, 'reminder_daynight_modal');
+  assert.equal(reminderCommand._private.buildReminderChannelSelect().toJSON().components[0].custom_id, 'reminder_channel_select');
+  assert.equal(reminderCommand._private.buildReminderRoleSelect().toJSON().components[0].custom_id, 'reminder_role_select');
+});
+
+test('control panel exposes module buttons and reminder module controls', () => {
+  const components = controlCommand.buildControlPanelComponents().map(row => row.toJSON());
+  const customIds = components.flatMap(row => row.components.map(component => component.custom_id));
+
+  assert.deepEqual(customIds, [
+    'control_module:reminder',
+    'control_module:attendance',
+    'control_module:announce',
+    'control_module:poll',
+    'control_module:market',
+    'control_module:help',
+  ]);
+
+  const reminderPanel = controlCommand.buildModulePanel('reminder', { isAdmin: true });
+  assert.equal(reminderPanel.embeds[0].toJSON().title, 'Reminder 控制');
+  assert.deepEqual(
+    reminderPanel.components
+      .map(row => row.toJSON())
+      .flatMap(row => row.components.map(component => component.custom_id)),
+    ['control_reminder_setup'],
   );
 });

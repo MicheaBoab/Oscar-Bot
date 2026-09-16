@@ -1,9 +1,7 @@
-const fs = require('fs');
-const path = require('path');
-const { Client, GatewayIntentBits, Events, Collection, EmbedBuilder, Partials } = require('discord.js');
+const { Client, GatewayIntentBits, Events, Collection, Partials } = require('discord.js');
 
 require("dotenv").config();
-const { listPolls, loadPoll } = require('./storage/pollFileStore');
+const { listPolls } = require('./storage/pollFileStore');
 const { initializeCodexAutoUpdate } = require('./storage/codexItemStore');
 const { startLiveQueueScheduler } = require('./helper/liveQueueScheduler');
 const { startReminderScheduler } = require('./helper/reminderScheduler');
@@ -12,55 +10,6 @@ const { loadAllAttendances } = require('./storage/attendanceStore');
 const pollTiles = listPolls();
 console.log(`♻️ 恢复 ${pollTiles.length} 个投票`);
 initializeCodexAutoUpdate();
-
-// ── Poll result helpers ─────────────────────────────────────────────────────
-function computePollResult(poll) {
-  const counts = new Array(poll.options.length).fill(0);
-  for (const voteIndex of Object.values(poll.votes || {})) {
-    if (Number.isFinite(voteIndex) && voteIndex >= 0 && voteIndex < poll.options.length) {
-      counts[voteIndex]++;
-    }
-  }
-  const totalVotes = counts.reduce((a, b) => a + b, 0);
-  const maxVotes = totalVotes > 0 ? Math.max(...counts) : 0;
-  const winnerIndexes = totalVotes > 0
-    ? counts.map((c, i) => ({ c, i })).filter(x => x.c === maxVotes).map(x => x.i)
-    : [];
-  const winnerMentions = winnerIndexes.map(i => {
-    const opt = poll.options[i];
-    if (opt.value.startsWith('user:')) return `<@${opt.value.split(':')[1]}>`;
-    return opt.label;
-  });
-  return { counts, totalVotes, maxVotes, winnerIndexes, winnerMentions };
-}
-
-function buildResultEmbed(poll, footerText = '该投票已结束') {
-  const { winnerMentions } = computePollResult(poll);
-  return new EmbedBuilder()
-    .setColor(0x57F287)
-    .setTitle('🟢 投票已结束\n')
-    .setDescription([
-      `\n🏆 **${poll.title}** 投票结果公布\n`,
-      `🎉 获胜者为：**${winnerMentions.join(' | ')}**`,
-      '\n👏 感谢大家的参与',
-    ].join('\n'))
-    .setFooter({ text: footerText })
-    .setTimestamp();
-}
-
-function buildDisabledEmbed(poll) {
-  const { counts } = computePollResult(poll);
-  const fields = poll.options.map((opt, i) => ({
-    name: '\u200B',
-    value: `${opt.label}\n**${counts[i]} 票**`,
-    inline: false,
-  }));
-  return new EmbedBuilder()
-    .setTitle(`📊 投票已结束：${poll.title}`)
-    .setDescription('⏱️ 该投票已到期结束，无法继续投票。')
-    .setFields(fields)
-    .setColor(0x99AAB5);
-}
 
 async function syncAttendanceMessage(client, attendanceCommand, attendance) {
   if (!attendanceCommand || !attendance?.channelId || !attendance?.messageId) return;
@@ -85,7 +34,7 @@ async function syncAttendanceMessage(client, attendanceCommand, attendance) {
 }
 
 async function refreshActiveAttendanceMessages(client) {
-  const attendanceCommand = client.commands.get('attendance');
+  const attendanceCommand = require('./commands/attendance');
   if (!attendanceCommand) return;
 
   for (const { data: attendance } of loadAllAttendances()) {
@@ -94,63 +43,18 @@ async function refreshActiveAttendanceMessages(client) {
   }
 }
 
-async function closeExpiredPolls(client = null, reason = 'startup') {
-  const {
-    listPolls,
-    loadPoll,
-    updatePoll,
-    archivePoll,
-  } = require('./storage/pollFileStore');
+async function refreshControlPanels(client) {
+  const controlCommand = require('./commands/control');
+  if (!controlCommand || typeof controlCommand.refreshAllControlPanels !== 'function') return;
 
-  const all = listPolls();
-  let closed = 0;
-
-  for (const pollTitle of all) {
-    const poll = loadPoll(pollTitle);
-    if (!poll || poll.status !== 'active') continue;
-    if (!Number.isFinite(poll.expiresAt)) {
-      poll.expiresAt = Date.now() + 10 * 60 * 1000;
-      updatePoll(pollTitle, poll);
-      continue;
-    }
-    if (Date.now() < poll.expiresAt) continue;
-
-    poll.status = 'ended';
-    updatePoll(pollTitle, poll);
-    archivePoll(pollTitle);
-    closed += 1;
-
-    // 有 client 时向频道发送统计结果，并将原消息更新为已结束样式
-    if (client && poll.channelId) {
-      try {
-        const channel = await client.channels.fetch(poll.channelId);
-        if (poll.messageId) {
-          try {
-            const msg = await channel.messages.fetch(poll.messageId);
-            await msg.edit({ content: null, embeds: [buildDisabledEmbed(poll)], components: [] });
-          } catch {
-            // 原消息已被删除或无权限，忽略
-          }
-        }
-        const { totalVotes } = computePollResult(poll);
-        if (totalVotes === 0) {
-          await channel.send({ content: `🏆 **投票结果公布**\n⚖️ **${poll.title}** 无人投票\n👏 感谢大家的参与` });
-        } else {
-          await channel.send({ embeds: [buildResultEmbed(poll, '该投票已超时自动结束')] });
-        }
-      } catch (err) {
-        console.error(`[poll] 自动结束 ${pollTitle} 时通知失败:`, err.message);
-      }
-    }
-  }
-
-  if (closed > 0) {
-    const prefix = reason === 'startup' ? '启动时' : '定时检查';
-    console.log(`⏱ ${prefix}已自动结束并归档 ${closed} 个过期投票`);
+  try {
+    await controlCommand.refreshAllControlPanels(client);
+  } catch (error) {
+    console.error('[control] 恢复中控台失败:', error.message);
   }
 }
 
-closeExpiredPolls(null, 'startup');
+const { scanPolls } = require('./helper/pollService');
 
 const client = new Client({
   intents: [
@@ -163,13 +67,7 @@ const client = new Client({
 // 存放所有命令
 client.commands = new Collection();
 
-const commandsPath = path.join(__dirname, 'commands');
-const commandFiles = fs
-  .readdirSync(commandsPath)
-  .filter(file => file.endsWith('.js'));
-
-for (const file of commandFiles) {
-  const command = require(path.join(commandsPath, file));
+for (const command of require('./helper/slashCommands').loadCommands()) {
   client.commands.set(command.data.name, command);
 }
 
@@ -178,13 +76,16 @@ client.once(Events.ClientReady, () => {
   startLiveQueueScheduler(client);
   startReminderScheduler(client);
   refreshActiveAttendanceMessages(client);
+  refreshControlPanels(client);
+  scanPolls(client, { refreshActive: true }).catch(console.error);
   setInterval(
-    () => closeExpiredPolls(client, 'interval').catch(err => console.error('[poll] 定时检查失败:', err)),
+    () => scanPolls(client).catch(err => console.error('[poll] 定时检查失败:', err)),
     15 * 1000,
   );
 });
 
 client.on(Events.InteractionCreate, async interaction => {
+  if (await require('./helper/panelInteractions').routePanelInteraction(interaction)) return;
   /* =========================
      Autocomplete
      ========================= */
@@ -224,7 +125,7 @@ client.on(Events.InteractionCreate, async interaction => {
   if (interaction.isButton()) {
     if (interaction.customId === 'attendance_specialization_change') {
       try {
-        const attendanceCommand = client.commands.get('attendance');
+        const attendanceCommand = require('./commands/attendance');
         if (attendanceCommand && typeof attendanceCommand.handleAttendanceSpecializationChange === 'function') {
           await attendanceCommand.handleAttendanceSpecializationChange(interaction);
         }
@@ -239,7 +140,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     if (interaction.customId.startsWith('attendance_specialization:')) {
       try {
-        const attendanceCommand = client.commands.get('attendance');
+        const attendanceCommand = require('./commands/attendance');
         if (attendanceCommand && typeof attendanceCommand.handleAttendanceSpecialization === 'function') {
           await attendanceCommand.handleAttendanceSpecialization(interaction);
         }
@@ -258,7 +159,7 @@ client.on(Events.InteractionCreate, async interaction => {
       || interaction.customId === 'attendance_cancel'
     ) {
       try {
-        const attendanceCommand = client.commands.get('attendance');
+        const attendanceCommand = require('./commands/attendance');
         if (attendanceCommand && typeof attendanceCommand.handleAttendanceButton === 'function') {
           await attendanceCommand.handleAttendanceButton(interaction);
         }
@@ -273,7 +174,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     if (interaction.customId.startsWith('attendance_close_confirm:')) {
       try {
-        const attendanceCommand = client.commands.get('attendance');
+        const attendanceCommand = require('./commands/attendance');
         if (attendanceCommand && typeof attendanceCommand.handleAttendanceCloseConfirm === 'function') {
           await attendanceCommand.handleAttendanceCloseConfirm(interaction);
         }
@@ -288,7 +189,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     if (interaction.customId === 'attendance_close_cancel') {
       try {
-        const attendanceCommand = client.commands.get('attendance');
+        const attendanceCommand = require('./commands/attendance');
         if (attendanceCommand && typeof attendanceCommand.handleAttendanceCloseCancel === 'function') {
           await attendanceCommand.handleAttendanceCloseCancel(interaction);
         }
@@ -300,7 +201,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     if (interaction.customId.startsWith('attendance_group_action:')) {
       try {
-        const attendanceCommand = client.commands.get('attendance');
+        const attendanceCommand = require('./commands/attendance');
         if (attendanceCommand && typeof attendanceCommand.handleGroupPanelAction === 'function') {
           await attendanceCommand.handleGroupPanelAction(interaction);
         }
@@ -313,47 +214,22 @@ client.on(Events.InteractionCreate, async interaction => {
       return;
     }
 
-    if (interaction.customId.startsWith('findall_page:')) {
+    if (interaction.customId.startsWith('reminder_board_')) {
       try {
-        const findAllCommand = client.commands.get('findall');
-        if (findAllCommand && typeof findAllCommand.handleFindAllPageButton === 'function') {
-          await findAllCommand.handleFindAllPageButton(interaction);
+        const reminderCommand = require('./commands/reminder');
+        if (reminderCommand && typeof reminderCommand.handleButton === 'function') {
+          await reminderCommand.handleButton(interaction);
         }
       } catch (error) {
-        console.error(error);
+        console.error('[reminder] 处理看板按钮失败:', error);
         if (!interaction.replied && !interaction.deferred) {
-          try {
-            await interaction.reply({ content: '❌ 翻页时发生错误', flags: 64 });
-          } catch (replyError) {
-            console.error(replyError);
-          }
+          await interaction.reply({ content: '❌ reminder 操作失败，请稍后再试。', flags: 64 });
         }
       }
       return;
     }
 
-    if (!interaction.customId.startsWith('find_page:')) return;
 
-    try {
-      const findCommand = client.commands.get('find');
-      if (!findCommand || typeof findCommand.handleFindPageButton !== 'function') {
-        return;
-      }
-
-      await findCommand.handleFindPageButton(interaction);
-    } catch (error) {
-      console.error(error);
-      if (!interaction.replied && !interaction.deferred) {
-        try {
-          await interaction.reply({
-            content: '❌ 翻页时发生错误',
-            flags: 64,
-          });
-        } catch (replyError) {
-          console.error(replyError);
-        }
-      }
-    }
     return;
   }
  
@@ -363,7 +239,7 @@ client.on(Events.InteractionCreate, async interaction => {
   if (interaction.isStringSelectMenu()) {
     if (interaction.customId.startsWith('attendance_class:')) {
       try {
-        const attendanceCommand = client.commands.get('attendance');
+        const attendanceCommand = require('./commands/attendance');
         if (attendanceCommand && typeof attendanceCommand.handleAttendanceClassSelection === 'function') {
           await attendanceCommand.handleAttendanceClassSelection(interaction);
         }
@@ -378,7 +254,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     if (interaction.customId === 'attendance_admin_menu') {
       try {
-        const attendanceCommand = client.commands.get('attendance');
+        const attendanceCommand = require('./commands/attendance');
         if (attendanceCommand && typeof attendanceCommand.handleAttendanceAdminMenu === 'function') {
           await attendanceCommand.handleAttendanceAdminMenu(interaction);
         }
@@ -393,7 +269,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     if (interaction.customId.startsWith('attendance_group_delete_select:')) {
       try {
-        const attendanceCommand = client.commands.get('attendance');
+        const attendanceCommand = require('./commands/attendance');
         if (attendanceCommand && typeof attendanceCommand.handleGroupDeleteSelect === 'function') {
           await attendanceCommand.handleGroupDeleteSelect(interaction);
         }
@@ -408,7 +284,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     if (interaction.customId.startsWith('attendance_group_target_select:')) {
       try {
-        const attendanceCommand = client.commands.get('attendance');
+        const attendanceCommand = require('./commands/attendance');
         if (attendanceCommand && typeof attendanceCommand.handleGroupTargetSelect === 'function') {
           await attendanceCommand.handleGroupTargetSelect(interaction);
         }
@@ -423,7 +299,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     if (interaction.customId.startsWith('attendance_group_user_select:')) {
       try {
-        const attendanceCommand = client.commands.get('attendance');
+        const attendanceCommand = require('./commands/attendance');
         if (attendanceCommand && typeof attendanceCommand.handleGroupUserSelect === 'function') {
           await attendanceCommand.handleGroupUserSelect(interaction);
         }
@@ -436,83 +312,28 @@ client.on(Events.InteractionCreate, async interaction => {
       return;
     }
 
-    if(!interaction.customId.startsWith('poll_select:')) return;
-
-    const {
-      loadPoll,
-      updatePoll,
-      archivePoll,
-    } = require('./storage/pollFileStore');
-
-    const pollTitle = interaction.customId.split(':')[1];
-    
-    // ⭐ 1️⃣ 从文件读取投票
-    const poll = loadPoll(pollTitle);
-
-    // ⭐ 如果投票不存在或已结束
-    if (!poll || poll.status !== 'active') {
-      await interaction.update({
-        content: '⏹️ 该投票已结束',
-        components: [],
-      });
-      return;
-    }
-
-    if (Number.isFinite(poll.expiresAt) && Date.now() >= poll.expiresAt) {
-      poll.status = 'ended';
-      updatePoll(pollTitle, poll);
-      archivePoll(pollTitle);
-      // 将原投票消息更新为已结束样式，移除下拉菜单
-      await interaction.update({ content: null, embeds: [buildDisabledEmbed(poll)], components: [] });
-      // 向频道发送投票结果
-      const { totalVotes } = computePollResult(poll);
-      if (totalVotes === 0) {
-        await interaction.channel.send({ content: `🏆 **投票结果公布**\n⚖️ **${poll.title}** 无人投票\n👏 感谢大家的参与` });
-      } else {
-        await interaction.channel.send({ embeds: [buildResultEmbed(poll, '该投票倒计时已结束')] });
+    if (interaction.customId === 'reminder_admin_menu' || interaction.customId.startsWith('reminder_select_')) {
+      try {
+        const reminderCommand = require('./commands/reminder');
+        if (reminderCommand && typeof reminderCommand.handleSelectMenu === 'function') {
+          await reminderCommand.handleSelectMenu(interaction);
+        }
+      } catch (error) {
+        console.error('[reminder] 处理看板选择菜单失败:', error);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '❌ reminder 操作失败，请稍后再试。', flags: 64 });
+        }
       }
       return;
     }
 
-    // ⭐ 3️⃣ 立刻占位（防止 3 秒超时）
-    await interaction.deferUpdate();
-
-    const userId = interaction.user.id;
-    const selectedValue = interaction.values[0];
-    const selectedIndex = poll.options.findIndex(
-      opt => opt.value === selectedValue
-    )
-
-    // 修改投票
-    poll.votes[userId] = selectedIndex;
-
-    // ⭐ 写回文件
-    updatePoll(pollTitle, poll);
-
-    // 重新统计票数
-    const counts = new Array(poll.options.length).fill(0);
-    for (const voteIndex of Object.values(poll.votes)) {
-      counts[voteIndex]++;
-    }
-
-    // 重建 Embed
-    const fields = poll.options.map((opt, i) => ({
-      name: `\u200B`,
-      value: `${opt.label}\n**${counts[i]} 票**`,
-      inline: false,
-    }));
-
-    const newEmbed = EmbedBuilder
-      .from(interaction.message.embeds[0])
-      .setFields(fields);
-
-    await interaction.editReply({embeds: [newEmbed]});
+    return;
   }
 
   if (interaction.isChannelSelectMenu()) {
     if (interaction.customId.startsWith('attendance_group_channel_select:')) {
       try {
-        const attendanceCommand = client.commands.get('attendance');
+        const attendanceCommand = require('./commands/attendance');
         if (attendanceCommand && typeof attendanceCommand.handleGroupChannelSelect === 'function') {
           await attendanceCommand.handleGroupChannelSelect(interaction);
         }
@@ -520,6 +341,38 @@ client.on(Events.InteractionCreate, async interaction => {
         console.error('[attendance] 处理分组频道选择失败:', error);
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: '❌ 分组频道设置失败，请稍后再试。', flags: 64 });
+        }
+      }
+      return;
+    }
+
+    if (interaction.customId === 'reminder_channel_select') {
+      try {
+        const reminderCommand = require('./commands/reminder');
+        if (reminderCommand && typeof reminderCommand.handleChannelSelect === 'function') {
+          await reminderCommand.handleChannelSelect(interaction);
+        }
+      } catch (error) {
+        console.error('[reminder] 处理提醒频道选择失败:', error);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '❌ reminder 频道设置失败，请稍后再试。', flags: 64 });
+        }
+      }
+    }
+    return;
+  }
+
+  if (typeof interaction.isRoleSelectMenu === 'function' && interaction.isRoleSelectMenu()) {
+    if (interaction.customId === 'reminder_role_select') {
+      try {
+        const reminderCommand = require('./commands/reminder');
+        if (reminderCommand && typeof reminderCommand.handleRoleSelect === 'function') {
+          await reminderCommand.handleRoleSelect(interaction);
+        }
+      } catch (error) {
+        console.error('[reminder] 处理提醒身分组选择失败:', error);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '❌ reminder 身分组设置失败，请稍后再试。', flags: 64 });
         }
       }
     }
@@ -532,7 +385,7 @@ client.on(Events.InteractionCreate, async interaction => {
   if (interaction.isModalSubmit()) {
     if (interaction.customId.startsWith('attendance_group_create_modal:')) {
       try {
-        const attendanceCommand = client.commands.get('attendance');
+        const attendanceCommand = require('./commands/attendance');
         if (attendanceCommand && typeof attendanceCommand.handleGroupCreateModalSubmit === 'function') {
           await attendanceCommand.handleGroupCreateModalSubmit(interaction);
         }
@@ -551,7 +404,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     if (interaction.customId.startsWith('notice_add_modal_') || interaction.customId.startsWith('notice_edit_modal_')) {
       try {
-        const noticeCommand = client.commands.get('notice');
+        const noticeCommand = require('./commands/notice');
         if (noticeCommand && typeof noticeCommand.handleModalSubmit === 'function') {
           await noticeCommand.handleModalSubmit(interaction);
         }
@@ -571,9 +424,9 @@ client.on(Events.InteractionCreate, async interaction => {
       return;
     }
 
-    if (interaction.customId === 'reminder_add_modal' || interaction.customId.startsWith('reminder_edit_modal_')) {
+    if (interaction.customId === 'reminder_add_modal' || interaction.customId.startsWith('reminder_edit_modal_') || interaction.customId === 'reminder_daynight_modal') {
       try {
-        const reminderCommand = client.commands.get('reminder');
+        const reminderCommand = require('./commands/reminder');
         if (reminderCommand && typeof reminderCommand.handleModalSubmit === 'function') {
           await reminderCommand.handleModalSubmit(interaction);
         }
